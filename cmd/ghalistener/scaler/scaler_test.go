@@ -12,7 +12,7 @@ var discardLogger = slog.New(slog.DiscardHandler)
 
 func TestSetDesiredWorkerState_MinMaxDefaults(t *testing.T) {
 	newEmptyWorker := func() *Scaler {
-		return &Scaler{
+		w := &Scaler{
 			config: Config{
 				MinRunners: 0,
 				MaxRunners: math.MaxInt32,
@@ -21,6 +21,8 @@ func TestSetDesiredWorkerState_MinMaxDefaults(t *testing.T) {
 			patchSeq:      -1,
 			logger:        discardLogger,
 		}
+		w.maxRunners.Store(int32(w.config.MaxRunners))
+		return w
 	}
 
 	t.Run("init calculate with acquired 0", func(t *testing.T) {
@@ -94,7 +96,7 @@ func TestSetDesiredWorkerState_MinMaxDefaults(t *testing.T) {
 
 func TestSetDesiredWorkerState_MinSet(t *testing.T) {
 	newEmptyWorker := func() *Scaler {
-		return &Scaler{
+		w := &Scaler{
 			config: Config{
 				MinRunners: 1,
 				MaxRunners: math.MaxInt32,
@@ -103,6 +105,8 @@ func TestSetDesiredWorkerState_MinSet(t *testing.T) {
 			patchSeq:      -1,
 			logger:        discardLogger,
 		}
+		w.maxRunners.Store(int32(w.config.MaxRunners))
+		return w
 	}
 
 	t.Run("initial scale when acquired == 0 and completed == 0", func(t *testing.T) {
@@ -155,7 +159,7 @@ func TestSetDesiredWorkerState_MinSet(t *testing.T) {
 
 func TestSetDesiredWorkerState_MaxSet(t *testing.T) {
 	newEmptyWorker := func() *Scaler {
-		return &Scaler{
+		w := &Scaler{
 			config: Config{
 				MinRunners: 0,
 				MaxRunners: 5,
@@ -164,6 +168,8 @@ func TestSetDesiredWorkerState_MaxSet(t *testing.T) {
 			patchSeq:      -1,
 			logger:        discardLogger,
 		}
+		w.maxRunners.Store(int32(w.config.MaxRunners))
+		return w
 	}
 
 	t.Run("initial scale when acquired == 0 and completed == 0", func(t *testing.T) {
@@ -257,7 +263,7 @@ func TestSetDesiredWorkerState_MaxSet(t *testing.T) {
 
 func TestSetDesiredWorkerState_MinMaxSet(t *testing.T) {
 	newEmptyWorker := func() *Scaler {
-		return &Scaler{
+		w := &Scaler{
 			config: Config{
 				MinRunners: 1,
 				MaxRunners: 3,
@@ -266,6 +272,8 @@ func TestSetDesiredWorkerState_MinMaxSet(t *testing.T) {
 			patchSeq:      -1,
 			logger:        discardLogger,
 		}
+		w.maxRunners.Store(int32(w.config.MaxRunners))
+		return w
 	}
 
 	t.Run("initial scale when acquired == 0 and completed == 0", func(t *testing.T) {

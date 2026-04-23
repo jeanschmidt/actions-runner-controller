@@ -6,8 +6,10 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
+	"github.com/actions/actions-runner-controller/cmd/ghalistener/capacity"
 	"github.com/actions/actions-runner-controller/cmd/ghalistener/config"
 	"github.com/actions/actions-runner-controller/cmd/ghalistener/metrics"
 	"github.com/actions/actions-runner-controller/cmd/ghalistener/scaler"
@@ -129,6 +131,34 @@ func run(ctx context.Context, config *config.Config) error {
 
 	g, ctx := errgroup.WithContext(ctx)
 	metricsCtx, cancelMetrics := context.WithCancelCause(ctx)
+
+	if cmPrefix := os.Getenv("DYNAMIC_CAPACITY_CONFIGMAP"); cmPrefix != "" {
+		normalizedName := strings.NewReplacer(".", "-", "_", "-").Replace(config.RunnerScaleSetName)
+		cmName := cmPrefix + normalizedName
+
+		nsBytes, err := os.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/namespace")
+		if err != nil {
+			return fmt.Errorf("DYNAMIC_CAPACITY_CONFIGMAP is set but failed to read pod namespace: %w", err)
+		}
+		ns := strings.TrimSpace(string(nsBytes))
+
+		watcher, err := capacity.NewConfigMapWatcher(capacity.WatcherConfig{
+			ConfigMapName: cmName,
+			Namespace:     ns,
+			Logger:        logger.With("component", "capacity-watcher"),
+			OnChange: func(maxRunners int) {
+				listener.SetMaxRunners(maxRunners)
+				scaler.SetMaxRunners(maxRunners)
+			},
+		})
+		if err != nil {
+			return fmt.Errorf("failed to create ConfigMap watcher: %w", err)
+		}
+
+		g.Go(func() error {
+			return watcher.Run(ctx)
+		})
+	}
 
 	g.Go(func() error {
 		logger.Info("Starting listener")

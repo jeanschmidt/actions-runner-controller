@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"sync/atomic"
 
 	"github.com/actions/actions-runner-controller/apis/actions.github.com/v1alpha1"
 	"github.com/actions/scaleset"
@@ -37,6 +38,7 @@ type Config struct {
 type Scaler struct {
 	clientset     *kubernetes.Clientset
 	config        Config
+	maxRunners    atomic.Int32
 	targetRunners int
 	patchSeq      int
 	// dirty is set when there are any events handled before the desired count is called.
@@ -52,6 +54,7 @@ func New(config Config, options ...Option) (*Scaler, error) {
 		targetRunners: -1,
 		patchSeq:      -1,
 	}
+	w.maxRunners.Store(int32(config.MaxRunners))
 
 	conf, err := rest.InClusterConfig()
 	if err != nil {
@@ -74,6 +77,10 @@ func New(config Config, options ...Option) (*Scaler, error) {
 	}
 
 	return w, nil
+}
+
+func (w *Scaler) SetMaxRunners(max int) {
+	w.maxRunners.Store(int32(max))
 }
 
 func (w *Scaler) applyDefaults() error {
@@ -234,7 +241,8 @@ func (w *Scaler) setDesiredWorkerState(count int) int {
 	}
 	w.patchSeq++
 
-	targetRunnerCount := min(w.config.MinRunners+count, w.config.MaxRunners)
+	maxRunners := int(w.maxRunners.Load())
+	targetRunnerCount := min(w.config.MinRunners+count, maxRunners)
 	oldTargetRunners := w.targetRunners
 	w.targetRunners = targetRunnerCount
 
@@ -252,7 +260,7 @@ func (w *Scaler) setDesiredWorkerState(count int) int {
 		"assigned job", count,
 		"decision", targetRunnerCount,
 		"min", w.config.MinRunners,
-		"max", w.config.MaxRunners,
+		"max", maxRunners,
 		"currentRunnerCount", w.targetRunners,
 	)
 
