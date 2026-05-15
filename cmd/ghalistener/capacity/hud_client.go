@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"time"
 )
 
@@ -35,29 +36,111 @@ type QueuedJobsForRunner struct {
 // HUDClient is an HTTP client for the PyTorch HUD API that returns
 // aggregate queued job counts per runner label.
 type HUDClient struct {
-	url    string
-	token  string
-	client *http.Client
+	// baseURL is the configured URL with any `parameters=` query value
+	// stripped out. We rebuild that query string per-request so each
+	// scale set can pass its own runnerLabels filter.
+	baseURL string
+	// baseParams holds the parameters JSON decoded from the configured URL
+	// (or an empty map if none was supplied). It is the seed that every
+	// per-request parameter object is built from, so existing manifest
+	// overrides (queuedThresholdMinutes, orgs, repo, maxAgeDays) continue
+	// to apply.
+	baseParams map[string]any
+	token      string
+	client     *http.Client
 }
 
 // NewHUDClient creates a new HUD API client with the given auth token.
-func NewHUDClient(url, token string) *HUDClient {
+// If hudURL carries a `parameters=<json>` query string, that JSON is parsed
+// once and used as the per-request parameter seed; runnerLabels is then
+// merged in at request time. URLs without a parameters query work too —
+// the seed is then an empty object and the server applies its defaults.
+func NewHUDClient(hudURL, token string) *HUDClient {
+	base, params := splitHUDURL(hudURL)
 	return &HUDClient{
-		url:    url,
-		token:  token,
-		client: &http.Client{Timeout: 10 * time.Second},
+		baseURL:    base,
+		baseParams: params,
+		token:      token,
+		client:     &http.Client{Timeout: 10 * time.Second},
 	}
+}
+
+// splitHUDURL pulls the `parameters=<json>` query value out of url and
+// returns the bare URL plus the decoded parameter map. If parsing fails
+// for any reason the input is returned untouched with an empty map —
+// failure-open keeps a malformed manifest from breaking the listener
+// entirely; the request will still go through with whatever the server
+// considers default parameters.
+func splitHUDURL(rawURL string) (string, map[string]any) {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return rawURL, map[string]any{}
+	}
+	q := u.Query()
+	paramsRaw := q.Get("parameters")
+	q.Del("parameters")
+	u.RawQuery = q.Encode()
+
+	params := map[string]any{}
+	if paramsRaw != "" {
+		// HUD historically also accepts `parameters=[]` (empty array). Treat
+		// any non-object payload as an empty seed map rather than erroring.
+		_ = json.Unmarshal([]byte(paramsRaw), &params)
+	}
+	return u.String(), params
+}
+
+// buildURL serialises baseParams + the per-request runnerLabels into a
+// fresh `?parameters=<json>` query on top of baseURL.
+func (c *HUDClient) buildURL(labels []string) (string, error) {
+	params := make(map[string]any, len(c.baseParams)+1)
+	for k, v := range c.baseParams {
+		params[k] = v
+	}
+	// Always set runnerLabels — non-nil even when empty so JSON encodes
+	// `[]` not `null`. The server-side default of an empty array is "no
+	// filter", which matches the previous full-aggregate behavior; once
+	// the scale set has labels, those filter the response down to one
+	// row, dropping the rest server-side.
+	if labels == nil {
+		labels = []string{}
+	}
+	params["runnerLabels"] = labels
+
+	encoded, err := json.Marshal(params)
+	if err != nil {
+		return "", fmt.Errorf("encoding HUD parameters: %w", err)
+	}
+
+	u, err := url.Parse(c.baseURL)
+	if err != nil {
+		return "", fmt.Errorf("parsing HUD base URL: %w", err)
+	}
+	q := u.Query()
+	q.Set("parameters", string(encoded))
+	u.RawQuery = q.Encode()
+	return u.String(), nil
 }
 
 // GetQueuedJobsForLabels queries the HUD API and returns the total
 // number of queued jobs matching any of the provided runner labels.
 // On any error the caller receives (0, err) and decides the fallback.
+//
+// labels is also pushed into the request as the `runnerLabels` query
+// parameter, so the server returns only matching rows. We still apply
+// the local match below as a safety net (in case the server hasn't been
+// upgraded yet, or rolls a query that ignores runnerLabels).
 func (c *HUDClient) GetQueuedJobsForLabels(ctx context.Context, labels []string) (int, error) {
 	if len(labels) == 0 {
 		return 0, nil
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.url, nil)
+	reqURL, err := c.buildURL(labels)
+	if err != nil {
+		return 0, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
 	if err != nil {
 		return 0, fmt.Errorf("building HUD request: %w", err)
 	}

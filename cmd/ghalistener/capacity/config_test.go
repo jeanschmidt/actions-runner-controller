@@ -56,7 +56,7 @@ func TestConfigFromEnv_Defaults(t *testing.T) {
 
 	assert.False(t, cfg.Enabled, "Enabled default")
 	assert.Equal(t, 0, cfg.ProactiveCapacity, "ProactiveCapacity default")
-	assert.Equal(t, 30*time.Second, cfg.RecalculateInterval, "RecalculateInterval default")
+	assert.Equal(t, 60*time.Second, cfg.RecalculateInterval, "RecalculateInterval default")
 	assert.Equal(t, 5*time.Minute, cfg.PlaceholderTimeout, "PlaceholderTimeout default")
 	assert.Equal(t, "", cfg.WorkflowCPU, "WorkflowCPU default")
 	assert.Equal(t, "", cfg.WorkflowMemory, "WorkflowMemory default")
@@ -125,7 +125,7 @@ func TestConfigFromEnv_InvalidValues_FallbackToDefaults(t *testing.T) {
 
 	assert.False(t, cfg.Enabled, "invalid bool falls back to false")
 	assert.Equal(t, 0, cfg.ProactiveCapacity, "invalid int falls back to 0")
-	assert.Equal(t, 30*time.Second, cfg.RecalculateInterval, "invalid duration falls back to 30s")
+	assert.Equal(t, 60*time.Second, cfg.RecalculateInterval, "invalid duration falls back to 60s")
 	assert.Equal(t, 5*time.Minute, cfg.PlaceholderTimeout, "invalid duration falls back to 5m")
 	assert.Equal(t, 0, cfg.WorkflowGPU, "invalid int falls back to 0")
 }
