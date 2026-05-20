@@ -452,17 +452,15 @@ func (m *Monitor) reconcileProvisioning(ctx context.Context) {
 		desiredPairs = min(desiredPairs, headroom)
 	}
 
-	// Clamp burst so we don't spike the cluster (overload git-cache rsync,
-	// Harbor manifest fetches, pypi-cache) when many jobs queue at once.
-	if m.config.MaxBurstCapacity > 0 {
-		desiredPairs = min(desiredPairs, m.config.MaxBurstCapacity)
-	}
-
 	desiredPairs = max(desiredPairs, 0)
 	m.recorder.SetDesiredPairs(desiredPairs)
 
-	// 6. Adjust: create or delete pairs.
-	m.adjustPairs(ctx, pairs, currentPairs, desiredPairs)
+	// 6. Adjust: create or delete pairs. MaxBurstCapacity is applied here as a
+	// per-cycle creation-rate cap (not an inventory cap) so the listener can
+	// ramp toward `desiredPairs` over multiple reconciles without overwhelming
+	// downstream services (git-cache rsync, Harbor, pypi-cache) on a single
+	// burst. Inventory ceiling is enforced by MaxRunners headroom above.
+	m.adjustPairs(ctx, pairs, currentPairs, desiredPairs, m.config.MaxBurstCapacity)
 
 	m.logger.Info("provisioning reconciled",
 		"queuedJobs", queuedJobs,
@@ -536,10 +534,15 @@ func (m *Monitor) reconcileReporting(ctx context.Context) {
 func (m *Monitor) adjustPairs(
 	ctx context.Context,
 	pairs map[string]*PlaceholderPair,
-	currentPairs, desiredPairs int,
+	currentPairs, desiredPairs, maxCreatePerCycle int,
 ) {
 	if currentPairs < desiredPairs {
 		toCreate := desiredPairs - currentPairs
+		// Per-cycle creation-rate cap. Scale-down is intentionally uncapped:
+		// freeing capacity should never be rate-limited.
+		if maxCreatePerCycle > 0 && toCreate > maxCreatePerCycle {
+			toCreate = maxCreatePerCycle
+		}
 		for i := 0; i < toCreate; i++ {
 			slotID := fmt.Sprintf("%d-%d", time.Now().Unix(), m.slotCounter.Add(1))
 			if err := m.placeholders.CreatePair(ctx, slotID); err != nil {

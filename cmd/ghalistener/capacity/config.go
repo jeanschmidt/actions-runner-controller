@@ -33,10 +33,12 @@ type Config struct {
 	PlaceholderTimeout  time.Duration
 	MaxRunners          int
 
-	// MaxBurstCapacity caps the maximum number of placeholder pairs (running + pending)
-	// the provisioner will create per reconcile cycle. 0 means no cap.
-	// Used to prevent burst node provisioning from overloading downstream services
-	// (git-cache rsync connection pool, Harbor manifest fetches, pypi-cache).
+	// MaxBurstCapacity caps the number of new placeholder pairs created per
+	// reconcile cycle (i.e. it rate-limits ramp-up, not steady-state
+	// inventory). Scale-down is intentionally uncapped. 0 means no cap.
+	// Used to prevent burst node provisioning from overloading downstream
+	// services (git-cache rsync connection pool, Harbor manifest fetches,
+	// pypi-cache). Steady-state inventory is bounded by MaxRunners.
 	MaxBurstCapacity int
 
 	// Workflow pod resources (for placeholder-workflow sizing)

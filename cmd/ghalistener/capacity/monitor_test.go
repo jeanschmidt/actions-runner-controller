@@ -1066,7 +1066,46 @@ func TestReconcile_MaxBurstCapacity_ZeroIsNoCap(t *testing.T) {
 		"MaxBurstCapacity=0 must NOT cap placeholders")
 }
 
-// MaxBurstCapacity > 0 and desired exceeds it -> clamp to MaxBurstCapacity.
+// MaxBurstCapacity is a per-cycle creation-rate cap: starting from 0 pairs,
+// the first reconcile creates at most MaxBurstCapacity pairs even when demand
+// is much higher. Successive reconciles continue creating up to the cap per
+// cycle until inventory converges to demand (or another cap kicks in).
+// Regression test for the pre-2026-05-20 inventory-cap semantics that
+// pinned `desiredPairs` at MaxBurstCapacity forever and gated ramp on
+// pickup_rate == arrival_rate.
+func TestReconcile_MaxBurstCapacity_RampsAcrossCycles(t *testing.T) {
+	hudRows := []QueuedJobsForRunner{
+		{RunnerLabel: "linux.2xlarge", NumQueuedJobs: 100},
+	}
+	cfg := Config{
+		ProactiveCapacity:  0,
+		MaxRunners:         0, // unlimited so MaxBurstCapacity is the only cap
+		MaxBurstCapacity:   4,
+		ScaleSetLabels:     []string{"linux.2xlarge"},
+		PlaceholderTimeout: 5 * time.Minute,
+	}
+	m, cs, _ := newTestMonitor(t, cfg, hudRows)
+	ctx := context.Background()
+
+	// Cycle 1: 0 -> 4 pairs.
+	m.reconcileProvisioning(ctx)
+	assert.Equal(t, 8, countPods(t, cs, "test-ns"),
+		"cycle 1: created MaxBurstCapacity=4 pairs (8 pods)")
+
+	// Cycle 2: 4 -> 8 pairs (another MaxBurstCapacity creations).
+	m.reconcileProvisioning(ctx)
+	assert.Equal(t, 16, countPods(t, cs, "test-ns"),
+		"cycle 2: another 4 pairs created on top of existing 4")
+
+	// Cycle 3: 8 -> 12 pairs.
+	m.reconcileProvisioning(ctx)
+	assert.Equal(t, 24, countPods(t, cs, "test-ns"),
+		"cycle 3: another 4 pairs created on top of existing 8")
+}
+
+// MaxBurstCapacity > 0 and desired exceeds it -> creation is rate-limited
+// to MaxBurstCapacity per cycle. With currentPairs=0 on a single reconcile,
+// the result is the same as the previous inventory-cap semantics.
 func TestReconcile_MaxBurstCapacity_ClampsWhenExceeded(t *testing.T) {
 	hudRows := []QueuedJobsForRunner{
 		{RunnerLabel: "linux.2xlarge", NumQueuedJobs: 50},
