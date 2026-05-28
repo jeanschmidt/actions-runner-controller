@@ -4,22 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"time"
 )
 
-const (
-	// defaultHUDAPIURL is the bare endpoint with no query string. Per-request
-	// parameters (including runnerLabels) are JSON-encoded and attached at
-	// call time — see hudRequestParams.
-	defaultHUDAPIURL = "https://hud.pytorch.org/api/clickhouse/queued_jobs_aggregate"
-	// hudResponseMaxBytes caps the JSON payload we will read from the HUD
-	// API. A misbehaving or compromised endpoint must not be able to OOM
-	// the listener by streaming an unbounded response.
-	hudResponseMaxBytes = 10 * 1024 * 1024 // 10 MiB
-)
+// defaultHUDAPIURL is the bare endpoint with no query string. Per-request
+// parameters (including runnerLabels) are JSON-encoded and attached at
+// call time — see hudRequestParams.
+const defaultHUDAPIURL = "https://hud.pytorch.org/api/clickhouse/queued_jobs_aggregate"
 
 // hudRequestParams is the JSON object sent as the `parameters` query
 // argument to the HUD API. The non-RunnerLabels fields match the values
@@ -138,8 +131,7 @@ func (c *HUDClient) GetQueuedJobsForLabels(ctx context.Context, labels []string)
 	}
 
 	var rows []QueuedJobsForRunner
-	body := io.LimitReader(resp.Body, hudResponseMaxBytes)
-	if err := json.NewDecoder(body).Decode(&rows); err != nil {
+	if err := json.NewDecoder(resp.Body).Decode(&rows); err != nil {
 		return 0, fmt.Errorf("decoding HUD response: %w", err)
 	}
 
