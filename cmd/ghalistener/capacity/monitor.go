@@ -304,13 +304,8 @@ func (m *Monitor) Run(ctx context.Context) error {
 	return ctx.Err()
 }
 
-// pickJitter returns a uniformly random duration in [0, interval). Used to
-// desync 50+ listeners' provisioner ticks after a rollout: without this,
-// the production log showed 28 hits at 18:45:37, 24 at 18:45:40, etc. —
-// every listener rolled out together hitting HUD on the same wall-clock
-// second forever. Extracted from runProvisioner so its randomness is
-// directly unit-testable; the bounds check also covers misconfiguration
-// where interval is non-positive.
+// pickJitter desyncs listeners rolled out together — without it, all 50
+// listeners' tickers stay phase-aligned forever and hit HUD in lockstep.
 func pickJitter(interval time.Duration) time.Duration {
 	if interval <= 0 {
 		return 0
@@ -319,11 +314,6 @@ func pickJitter(interval time.Duration) time.Duration {
 }
 
 func (m *Monitor) runProvisioner(ctx context.Context) {
-	// Spread out the first ticker fire across [0, RecalculateInterval) so
-	// 50 listeners rolled out together don't all hit HUD on the same
-	// second. An initial reconcile already ran synchronously before this
-	// goroutine starts (see Run), so capacity is still adjusted promptly
-	// at listener start — the jitter only affects subsequent periodic ticks.
 	jitter := pickJitter(m.config.RecalculateInterval)
 	m.logger.Info("provisioner jitter before first tick", "delay", jitter)
 	select {

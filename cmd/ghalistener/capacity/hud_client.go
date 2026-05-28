@@ -9,17 +9,8 @@ import (
 	"time"
 )
 
-// defaultHUDAPIURL is the bare endpoint with no query string. Per-request
-// parameters (including runnerLabels) are JSON-encoded and attached at
-// call time — see hudRequestParams.
 const defaultHUDAPIURL = "https://hud.pytorch.org/api/clickhouse/queued_jobs_aggregate"
 
-// hudRequestParams is the JSON object sent as the `parameters` query
-// argument to the HUD API. The non-RunnerLabels fields match the values
-// the OSDC autoscaler needs (any-duration queued jobs, pytorch org only,
-// 3-day window). Change them here in code if behavior needs to differ —
-// keeping them in Go (not in a baked-in URL) is what lets us drop the
-// previous URL-parameter-parsing dance.
 type hudRequestParams struct {
 	QueuedThresholdMinutes int      `json:"queuedThresholdMinutes"`
 	MaxAgeDays             int      `json:"maxAgeDays"`
@@ -28,9 +19,6 @@ type hudRequestParams struct {
 	RunnerLabels           []string `json:"runnerLabels"`
 }
 
-// defaultHUDRequestParams returns the per-request parameter struct seeded
-// with the OSDC defaults. The caller fills in RunnerLabels for the scale
-// set before serialisation.
 func defaultHUDRequestParams() hudRequestParams {
 	return hudRequestParams{
 		QueuedThresholdMinutes: 0,
@@ -40,7 +28,6 @@ func defaultHUDRequestParams() hudRequestParams {
 	}
 }
 
-// QueuedJobsForRunner represents a single row from the HUD API response.
 type QueuedJobsForRunner struct {
 	RunnerLabel         string  `json:"runner_label"`
 	Org                 string  `json:"org"`
@@ -50,19 +37,12 @@ type QueuedJobsForRunner struct {
 	MaxQueueTimeMinutes float64 `json:"max_queue_time_minutes"`
 }
 
-// HUDClient is an HTTP client for the PyTorch HUD API that returns
-// aggregate queued job counts per runner label.
 type HUDClient struct {
 	url    string
 	token  string
 	client *http.Client
 }
 
-// NewHUDClient creates a new HUD API client. hudURL is the bare endpoint
-// (no `parameters=` query); parameters are assembled per-request from the
-// hudRequestParams struct above. Any query string already present on the
-// supplied URL is preserved verbatim, except that `parameters` is always
-// overwritten.
 func NewHUDClient(hudURL, token string) *HUDClient {
 	return &HUDClient{
 		url:    hudURL,
@@ -71,12 +51,10 @@ func NewHUDClient(hudURL, token string) *HUDClient {
 	}
 }
 
-// buildURL serialises the default parameters with RunnerLabels=labels into
-// the `parameters` query argument on top of c.url.
 func (c *HUDClient) buildURL(labels []string) (string, error) {
 	p := defaultHUDRequestParams()
-	// Always non-nil so JSON encodes as `[]` not `null`.
 	if labels == nil {
+		// Marshal as `[]`, not `null`.
 		labels = []string{}
 	}
 	p.RunnerLabels = labels
@@ -96,14 +74,9 @@ func (c *HUDClient) buildURL(labels []string) (string, error) {
 	return u.String(), nil
 }
 
-// GetQueuedJobsForLabels queries the HUD API and returns the total
-// number of queued jobs matching any of the provided runner labels.
-// On any error the caller receives (0, err) and decides the fallback.
-//
-// labels is also pushed into the request as the `runnerLabels` field of
-// the `parameters` JSON so the server returns only matching rows. We
-// still apply the local match below as a safety net (in case the server
-// hasn't been upgraded yet, or rolls a query that ignores runnerLabels).
+// GetQueuedJobsForLabels pushes labels into the request's runnerLabels so
+// the server filters server-side. The local re-filter below is defense in
+// depth against a future server-side regression that ignores the filter.
 func (c *HUDClient) GetQueuedJobsForLabels(ctx context.Context, labels []string) (int, error) {
 	if len(labels) == 0 {
 		return 0, nil
