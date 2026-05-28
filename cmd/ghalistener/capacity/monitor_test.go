@@ -1287,6 +1287,38 @@ func TestPickJitter_NonPositiveInterval(t *testing.T) {
 	assert.Equal(t, time.Duration(0), pickJitter(-time.Second))
 }
 
+// time.NewTicker(0) panics, so a 0 RecalculateInterval misconfig must be
+// handled before the ticker is created. runProvisioner should still do the
+// initial reconcile and then park on ctx instead of crashing the listener.
+func TestRunProvisioner_ZeroIntervalDoesNotPanic(t *testing.T) {
+	cfg := Config{
+		ProactiveCapacity:   1,
+		MaxRunners:          5,
+		PlaceholderTimeout:  5 * time.Minute,
+		RecalculateInterval: 0,
+	}
+	m, _, _ := newTestMonitor(t, cfg, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	done := make(chan struct{})
+	go func() {
+		m.runProvisioner(ctx)
+		close(done)
+	}()
+
+	// Give the goroutine time to do the initial reconcile and park on ctx.
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("runProvisioner did not exit within 2s after ctx cancel")
+	}
+}
+
 // Edge case: real runner pods have already exhausted (or exceeded) MaxRunners.
 // The headroom subtraction goes negative -> max(0) clamps it -> desiredPairs=0,
 // no placeholders are created. Prevents over-provisioning when the cap is hit.

@@ -272,8 +272,9 @@ func (m *Monitor) Run(ctx context.Context) error {
 		m.recorder.IncPairDeletes(deleteReasonOrphan, resultSuccess)
 	}
 
-	// Initial reconciliation: provision first, then report.
-	m.reconcileProvisioning(ctx)
+	// Initial reporting only; the initial provisioning reconcile runs
+	// inside runProvisioner after the startup jitter so 50 listeners
+	// rolled out together don't all hit HUD at t=0.
 	m.reconcileReporting(ctx)
 
 	// Reporter has its own cancel for ordered shutdown:
@@ -315,11 +316,22 @@ func pickJitter(interval time.Duration) time.Duration {
 
 func (m *Monitor) runProvisioner(ctx context.Context) {
 	jitter := pickJitter(m.config.RecalculateInterval)
-	m.logger.Info("provisioner jitter before first tick", "delay", jitter)
+	m.logger.Info("provisioner jitter before first reconcile", "delay", jitter)
 	select {
 	case <-ctx.Done():
 		return
 	case <-time.After(jitter):
+	}
+
+	m.reconcileProvisioning(ctx)
+
+	if m.config.RecalculateInterval <= 0 {
+		// Avoid time.NewTicker(0) panic. Park on ctx; the initial
+		// reconcile above is the only one we'll do until restart.
+		m.logger.Warn("RecalculateInterval is non-positive; skipping periodic reconcile",
+			"interval", m.config.RecalculateInterval)
+		<-ctx.Done()
+		return
 	}
 
 	ticker := time.NewTicker(m.config.RecalculateInterval)

@@ -4,12 +4,20 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"time"
 )
 
-const defaultHUDAPIURL = "https://hud.pytorch.org/api/clickhouse/queued_jobs_aggregate"
+const (
+	defaultHUDAPIURL = "https://hud.pytorch.org/api/clickhouse/queued_jobs_aggregate"
+	// Vercel Pro/Enterprise caps serverless function responses at 4.5 MB.
+	// hud.pytorch.org runs on Vercel, so any real response is below this;
+	// the cap is the listener's own guard against OOM if HUD moves off
+	// Vercel or returns a runaway payload.
+	hudResponseMaxBytes = 4_500_000
+)
 
 type hudRequestParams struct {
 	QueuedThresholdMinutes int      `json:"queuedThresholdMinutes"`
@@ -104,7 +112,7 @@ func (c *HUDClient) GetQueuedJobsForLabels(ctx context.Context, labels []string)
 	}
 
 	var rows []QueuedJobsForRunner
-	if err := json.NewDecoder(resp.Body).Decode(&rows); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, hudResponseMaxBytes)).Decode(&rows); err != nil {
 		return 0, fmt.Errorf("decoding HUD response: %w", err)
 	}
 
