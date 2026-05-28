@@ -154,7 +154,7 @@ func TestGetQueuedJobsForLabels_SendsExpectedParameters(t *testing.T) {
 		require.NotEmpty(t, paramsRaw, "request must carry a parameters query")
 		require.NoError(t, json.Unmarshal([]byte(paramsRaw), &got))
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode([]QueuedJobsForRunner{})
+		require.NoError(t, json.NewEncoder(w).Encode([]QueuedJobsForRunner{}))
 	})
 	defer cleanup()
 
@@ -182,7 +182,7 @@ func TestGetQueuedJobsForLabels_LocalFilterAppliesWhenServerIgnoresRunnerLabels(
 	}
 	client, cleanup := newTestHUDClient(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(rows)
+		require.NoError(t, json.NewEncoder(w).Encode(rows))
 	})
 	defer cleanup()
 
