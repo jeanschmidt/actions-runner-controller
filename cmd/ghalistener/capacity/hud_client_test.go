@@ -171,10 +171,9 @@ func TestGetQueuedJobsForLabels_SendsExpectedParameters(t *testing.T) {
 	assert.Equal(t, []string{"l-x86iavx512-32-256", "self-hosted"}, got.RunnerLabels)
 }
 
-// The client must still filter locally, in case the HUD server is on an
-// older revision that ignores the runnerLabels parameter and returns the
-// full aggregate. Once test-infra rolls out the new query this is
-// belt-and-suspenders, but during the rollout window it's load-bearing.
+// Defense in depth: if a future HUD server-side regression drops or
+// ignores the runnerLabels filter and returns the full aggregate, the
+// client must still produce the right per-scale-set count.
 func TestGetQueuedJobsForLabels_LocalFilterAppliesWhenServerIgnoresRunnerLabels(t *testing.T) {
 	rows := []QueuedJobsForRunner{
 		{RunnerLabel: "wanted", NumQueuedJobs: 7},
@@ -217,6 +216,25 @@ func TestBuildURL_OverwritesPreexistingParametersQuery(t *testing.T) {
 	assert.Equal(t, 3, got.MaxAgeDays, "stale URL-embedded maxAgeDays must be ignored")
 	assert.Equal(t, []string{"pytorch"}, got.Orgs, "stale URL-embedded orgs must be ignored")
 	assert.Equal(t, []string{"label-1"}, got.RunnerLabels)
+}
+
+// Any query params on the seed URL other than `parameters` must survive
+// buildURL — only `parameters` is overwritten. The rollout-ordering story
+// in the PR relies on this: a manifest carrying both the legacy
+// `?parameters=…` and some other query (e.g. `?foo=bar`) keeps `foo`.
+func TestBuildURL_PreservesOtherQueryParameters(t *testing.T) {
+	seedURL := "https://hud.example/api/queued_jobs_aggregate" +
+		"?foo=bar&parameters=%7B%22maxAgeDays%22%3A99%7D&baz=qux"
+	client := NewHUDClient(seedURL, "tok")
+
+	built, err := client.buildURL([]string{"label-1"})
+	require.NoError(t, err)
+
+	u, err := neturl.Parse(built)
+	require.NoError(t, err)
+	q := u.Query()
+	assert.Equal(t, "bar", q.Get("foo"), "non-parameters query must survive")
+	assert.Equal(t, "qux", q.Get("baz"), "non-parameters query must survive")
 }
 
 // Empty runnerLabels must serialise as `[]`, not `null`. The HUD query
