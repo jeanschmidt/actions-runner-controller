@@ -650,6 +650,56 @@ func TestWorkflowPlaceholder_RunnerClassMustBeRequiredNotPreferred(t *testing.T)
 	}
 }
 
+// WorkflowSchedulerName must be stamped onto the workflow placeholder so it
+// mirrors the real workflow/job pod (which sets schedulerName: numa-scheduler
+// on multi-NUMA GPU defs). The reservation is only faithful if the placeholder
+// is scheduled by the same scheduler that will later place the real pod.
+func TestWorkflowPlaceholder_SchedulerName_SetWhenConfigured(t *testing.T) {
+	pm, _ := newTestPM(t, Config{WorkflowSchedulerName: "numa-scheduler"})
+	ctx := context.Background()
+
+	require.NoError(t, pm.CreatePair(ctx, "s1"))
+	pairs, _ := pm.ListPairs(ctx)
+	wf := pairs["s1"].WorkflowPod
+	require.NotNil(t, wf)
+
+	assert.Equal(t, "numa-scheduler", wf.Spec.SchedulerName,
+		"workflow placeholder must adopt the configured WorkflowSchedulerName")
+}
+
+// The runner placeholder mirrors the runner orchestrator pod, which runs on the
+// homogeneous c7i-runner pool with the default scheduler. It must NEVER inherit
+// WorkflowSchedulerName — otherwise it would land numa-scheduler on c7i-runner
+// nodes that have no NodeResourceTopology, diverging from the real runner pod.
+func TestRunnerPlaceholder_NeverUsesSchedulerName(t *testing.T) {
+	pm, _ := newTestPM(t, Config{WorkflowSchedulerName: "numa-scheduler"})
+	ctx := context.Background()
+
+	require.NoError(t, pm.CreatePair(ctx, "s1"))
+	pairs, _ := pm.ListPairs(ctx)
+	runner := pairs["s1"].RunnerPod
+	require.NotNil(t, runner)
+
+	assert.Equal(t, "", runner.Spec.SchedulerName,
+		"runner placeholder must stay on the default scheduler even when "+
+			"WorkflowSchedulerName is set (deliberate runner/workflow asymmetry)")
+}
+
+// With no scheduler configured, both placeholders leave schedulerName empty so
+// Kubernetes dispatches them with the default scheduler.
+func TestPlaceholders_SchedulerName_EmptyByDefault(t *testing.T) {
+	pm, _ := newTestPM(t, Config{})
+	ctx := context.Background()
+
+	require.NoError(t, pm.CreatePair(ctx, "s1"))
+	pairs, _ := pm.ListPairs(ctx)
+
+	assert.Equal(t, "", pairs["s1"].WorkflowPod.Spec.SchedulerName,
+		"workflow placeholder defaults to the default scheduler")
+	assert.Equal(t, "", pairs["s1"].RunnerPod.Spec.SchedulerName,
+		"runner placeholder defaults to the default scheduler")
+}
+
 func tolerationKeySet(tolerations []corev1.Toleration) map[string]struct{} {
 	s := make(map[string]struct{}, len(tolerations))
 	for _, t := range tolerations {

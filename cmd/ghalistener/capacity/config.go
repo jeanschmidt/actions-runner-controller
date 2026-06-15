@@ -45,6 +45,9 @@ type Config struct {
 	WorkflowGPU    int
 	WorkflowDisk   string
 
+	// Workflow scheduling ensures placeholder availability is representative.
+	WorkflowSchedulerName string
+
 	// Runner pod resources (for placeholder-runner sizing)
 	RunnerCPU    string
 	RunnerMemory string
@@ -94,6 +97,7 @@ func ConfigFromEnv() Config {
 		WorkflowMemory:         envString("CAPACITY_AWARE_WORKFLOW_MEMORY", ""),
 		WorkflowGPU:            envInt("CAPACITY_AWARE_WORKFLOW_GPU", 0),
 		WorkflowDisk:           envString("CAPACITY_AWARE_WORKFLOW_DISK", ""),
+		WorkflowSchedulerName:  envString("CAPACITY_AWARE_WORKFLOW_SCHEDULER_NAME", ""),
 		RunnerCPU:              envString("CAPACITY_AWARE_RUNNER_CPU", "750m"),
 		RunnerMemory:           envString("CAPACITY_AWARE_RUNNER_MEMORY", "512Mi"),
 		NodeFleet:              envString("CAPACITY_AWARE_NODE_FLEET", ""),

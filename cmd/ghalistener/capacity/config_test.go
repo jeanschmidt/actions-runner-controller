@@ -43,6 +43,7 @@ func TestConfigFromEnv_Defaults(t *testing.T) {
 		"CAPACITY_AWARE_WORKFLOW_MEMORY",
 		"CAPACITY_AWARE_WORKFLOW_GPU",
 		"CAPACITY_AWARE_WORKFLOW_DISK",
+		"CAPACITY_AWARE_WORKFLOW_SCHEDULER_NAME",
 		"CAPACITY_AWARE_RUNNER_CPU",
 		"CAPACITY_AWARE_RUNNER_MEMORY",
 		"CAPACITY_AWARE_NODE_FLEET",
@@ -64,6 +65,7 @@ func TestConfigFromEnv_Defaults(t *testing.T) {
 	assert.Equal(t, "", cfg.WorkflowMemory, "WorkflowMemory default")
 	assert.Equal(t, 0, cfg.WorkflowGPU, "WorkflowGPU default")
 	assert.Equal(t, "", cfg.WorkflowDisk, "WorkflowDisk default")
+	assert.Equal(t, "", cfg.WorkflowSchedulerName, "WorkflowSchedulerName default")
 	assert.Equal(t, "750m", cfg.RunnerCPU, "RunnerCPU default")
 	assert.Equal(t, "512Mi", cfg.RunnerMemory, "RunnerMemory default")
 	assert.Equal(t, "", cfg.NodeFleet, "NodeFleet default")
@@ -90,6 +92,7 @@ func TestConfigFromEnv_AllSet(t *testing.T) {
 		"CAPACITY_AWARE_WORKFLOW_MEMORY":           "8Gi",
 		"CAPACITY_AWARE_WORKFLOW_GPU":              "2",
 		"CAPACITY_AWARE_WORKFLOW_DISK":             "100Gi",
+		"CAPACITY_AWARE_WORKFLOW_SCHEDULER_NAME":   "numa-scheduler",
 		"CAPACITY_AWARE_RUNNER_CPU":                "1",
 		"CAPACITY_AWARE_RUNNER_MEMORY":             "1Gi",
 		"CAPACITY_AWARE_NODE_FLEET":                "gpu-fleet",
@@ -110,6 +113,7 @@ func TestConfigFromEnv_AllSet(t *testing.T) {
 	assert.Equal(t, "8Gi", cfg.WorkflowMemory)
 	assert.Equal(t, 2, cfg.WorkflowGPU)
 	assert.Equal(t, "100Gi", cfg.WorkflowDisk)
+	assert.Equal(t, "numa-scheduler", cfg.WorkflowSchedulerName)
 	assert.Equal(t, "1", cfg.RunnerCPU)
 	assert.Equal(t, "1Gi", cfg.RunnerMemory)
 	assert.Equal(t, "gpu-fleet", cfg.NodeFleet)

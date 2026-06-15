@@ -467,6 +467,9 @@ func (pm *PlaceholderManager) buildWorkflowPlaceholder(slotID string) *corev1.Po
 	pod.Spec.Affinity = pm.buildWorkflowAffinity()
 	pod.Spec.Tolerations = tolerations
 	pod.Spec.PriorityClassName = "placeholder-workflow"
+	if pm.config.WorkflowSchedulerName != "" {
+		pod.Spec.SchedulerName = pm.config.WorkflowSchedulerName
+	}
 	return pod
 }
 
