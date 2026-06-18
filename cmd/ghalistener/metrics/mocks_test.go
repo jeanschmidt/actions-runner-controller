@@ -822,6 +822,46 @@ func (_c *MockCapacityRecorder_SetProactiveCapacity_Call) RunAndReturn(run func(
 	return _c
 }
 
+// SetHUDFailureBaseCapacity provides a mock function for the type MockCapacityRecorder
+func (_mock *MockCapacityRecorder) SetHUDFailureBaseCapacity(value int) {
+	_mock.Called(value)
+	return
+}
+
+// MockCapacityRecorder_SetHUDFailureBaseCapacity_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetHUDFailureBaseCapacity'
+type MockCapacityRecorder_SetHUDFailureBaseCapacity_Call struct {
+	*mock.Call
+}
+
+// SetHUDFailureBaseCapacity is a helper method to define mock.On call
+//   - value int
+func (_e *MockCapacityRecorder_Expecter) SetHUDFailureBaseCapacity(value interface{}) *MockCapacityRecorder_SetHUDFailureBaseCapacity_Call {
+	return &MockCapacityRecorder_SetHUDFailureBaseCapacity_Call{Call: _e.mock.On("SetHUDFailureBaseCapacity", value)}
+}
+
+func (_c *MockCapacityRecorder_SetHUDFailureBaseCapacity_Call) Run(run func(value int)) *MockCapacityRecorder_SetHUDFailureBaseCapacity_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 int
+		if args[0] != nil {
+			arg0 = args[0].(int)
+		}
+		run(
+			arg0,
+		)
+	})
+	return _c
+}
+
+func (_c *MockCapacityRecorder_SetHUDFailureBaseCapacity_Call) Return() *MockCapacityRecorder_SetHUDFailureBaseCapacity_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockCapacityRecorder_SetHUDFailureBaseCapacity_Call) RunAndReturn(run func(value int)) *MockCapacityRecorder_SetHUDFailureBaseCapacity_Call {
+	_c.Run(run)
+	return _c
+}
+
 // SetQueuedJobs provides a mock function for the type MockCapacityRecorder
 func (_mock *MockCapacityRecorder) SetQueuedJobs(value int) {
 	_mock.Called(value)
@@ -1778,6 +1818,46 @@ func (_c *MockServerExporter_SetProactiveCapacity_Call) Return() *MockServerExpo
 }
 
 func (_c *MockServerExporter_SetProactiveCapacity_Call) RunAndReturn(run func(value int)) *MockServerExporter_SetProactiveCapacity_Call {
+	_c.Run(run)
+	return _c
+}
+
+// SetHUDFailureBaseCapacity provides a mock function for the type MockServerExporter
+func (_mock *MockServerExporter) SetHUDFailureBaseCapacity(value int) {
+	_mock.Called(value)
+	return
+}
+
+// MockServerExporter_SetHUDFailureBaseCapacity_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetHUDFailureBaseCapacity'
+type MockServerExporter_SetHUDFailureBaseCapacity_Call struct {
+	*mock.Call
+}
+
+// SetHUDFailureBaseCapacity is a helper method to define mock.On call
+//   - value int
+func (_e *MockServerExporter_Expecter) SetHUDFailureBaseCapacity(value interface{}) *MockServerExporter_SetHUDFailureBaseCapacity_Call {
+	return &MockServerExporter_SetHUDFailureBaseCapacity_Call{Call: _e.mock.On("SetHUDFailureBaseCapacity", value)}
+}
+
+func (_c *MockServerExporter_SetHUDFailureBaseCapacity_Call) Run(run func(value int)) *MockServerExporter_SetHUDFailureBaseCapacity_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 int
+		if args[0] != nil {
+			arg0 = args[0].(int)
+		}
+		run(
+			arg0,
+		)
+	})
+	return _c
+}
+
+func (_c *MockServerExporter_SetHUDFailureBaseCapacity_Call) Return() *MockServerExporter_SetHUDFailureBaseCapacity_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockServerExporter_SetHUDFailureBaseCapacity_Call) RunAndReturn(run func(value int)) *MockServerExporter_SetHUDFailureBaseCapacity_Call {
 	_c.Run(run)
 	return _c
 }

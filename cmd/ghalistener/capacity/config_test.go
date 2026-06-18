@@ -43,6 +43,7 @@ func TestConfigFromEnv_Defaults(t *testing.T) {
 		"CAPACITY_AWARE_WORKFLOW_MEMORY",
 		"CAPACITY_AWARE_WORKFLOW_GPU",
 		"CAPACITY_AWARE_WORKFLOW_DISK",
+		"CAPACITY_AWARE_WORKFLOW_SCHEDULER_NAME",
 		"CAPACITY_AWARE_RUNNER_CPU",
 		"CAPACITY_AWARE_RUNNER_MEMORY",
 		"CAPACITY_AWARE_NODE_FLEET",
@@ -50,6 +51,7 @@ func TestConfigFromEnv_Defaults(t *testing.T) {
 		"CAPACITY_AWARE_RUNNER_CLASS",
 		"CAPACITY_AWARE_HUD_API_TOKEN",
 		"CAPACITY_AWARE_HUD_FAILURE_MULTIPLIER",
+		"CAPACITY_AWARE_HUD_FAILURE_BASE_CAPACITY",
 	}
 	unsetEnvs(t, keys)
 
@@ -63,6 +65,7 @@ func TestConfigFromEnv_Defaults(t *testing.T) {
 	assert.Equal(t, "", cfg.WorkflowMemory, "WorkflowMemory default")
 	assert.Equal(t, 0, cfg.WorkflowGPU, "WorkflowGPU default")
 	assert.Equal(t, "", cfg.WorkflowDisk, "WorkflowDisk default")
+	assert.Equal(t, "", cfg.WorkflowSchedulerName, "WorkflowSchedulerName default")
 	assert.Equal(t, "750m", cfg.RunnerCPU, "RunnerCPU default")
 	assert.Equal(t, "512Mi", cfg.RunnerMemory, "RunnerMemory default")
 	assert.Equal(t, "", cfg.NodeFleet, "NodeFleet default")
@@ -70,6 +73,7 @@ func TestConfigFromEnv_Defaults(t *testing.T) {
 	assert.Equal(t, "", cfg.RunnerClass, "RunnerClass default")
 	assert.Equal(t, "", cfg.HUDAPIToken, "HUDAPIToken default")
 	assert.Equal(t, defaultHUDFailureMultiplier, cfg.HUDFailureMultiplier, "HUDFailureMultiplier default")
+	assert.Equal(t, 0, cfg.HUDFailureBaseCapacity, "HUDFailureBaseCapacity default")
 	// Fields set by main.go should be zero values.
 	assert.Equal(t, 0, cfg.MaxRunners, "MaxRunners zero")
 	assert.Equal(t, 0, cfg.ScaleSetID, "ScaleSetID zero")
@@ -80,21 +84,23 @@ func TestConfigFromEnv_Defaults(t *testing.T) {
 
 func TestConfigFromEnv_AllSet(t *testing.T) {
 	setEnvs(t, map[string]string{
-		"CAPACITY_AWARE_ENABLED":                "true",
-		"CAPACITY_AWARE_PROACTIVE_CAPACITY":     "5",
-		"CAPACITY_AWARE_RECALCULATE_INTERVAL":   "10s",
-		"CAPACITY_AWARE_PLACEHOLDER_TIMEOUT":    "2m",
-		"CAPACITY_AWARE_WORKFLOW_CPU":           "4",
-		"CAPACITY_AWARE_WORKFLOW_MEMORY":        "8Gi",
-		"CAPACITY_AWARE_WORKFLOW_GPU":           "2",
-		"CAPACITY_AWARE_WORKFLOW_DISK":          "100Gi",
-		"CAPACITY_AWARE_RUNNER_CPU":             "1",
-		"CAPACITY_AWARE_RUNNER_MEMORY":          "1Gi",
-		"CAPACITY_AWARE_NODE_FLEET":             "gpu-fleet",
-		"CAPACITY_AWARE_RUNNER_NODE_FLEET":      "c7i-runner",
-		"CAPACITY_AWARE_RUNNER_CLASS":           "gpu-large",
-		"CAPACITY_AWARE_HUD_API_TOKEN":          "secret-token",
-		"CAPACITY_AWARE_HUD_FAILURE_MULTIPLIER": "5",
+		"CAPACITY_AWARE_ENABLED":                   "true",
+		"CAPACITY_AWARE_PROACTIVE_CAPACITY":        "5",
+		"CAPACITY_AWARE_RECALCULATE_INTERVAL":      "10s",
+		"CAPACITY_AWARE_PLACEHOLDER_TIMEOUT":       "2m",
+		"CAPACITY_AWARE_WORKFLOW_CPU":              "4",
+		"CAPACITY_AWARE_WORKFLOW_MEMORY":           "8Gi",
+		"CAPACITY_AWARE_WORKFLOW_GPU":              "2",
+		"CAPACITY_AWARE_WORKFLOW_DISK":             "100Gi",
+		"CAPACITY_AWARE_WORKFLOW_SCHEDULER_NAME":   "numa-scheduler",
+		"CAPACITY_AWARE_RUNNER_CPU":                "1",
+		"CAPACITY_AWARE_RUNNER_MEMORY":             "1Gi",
+		"CAPACITY_AWARE_NODE_FLEET":                "gpu-fleet",
+		"CAPACITY_AWARE_RUNNER_NODE_FLEET":         "c7i-runner",
+		"CAPACITY_AWARE_RUNNER_CLASS":              "gpu-large",
+		"CAPACITY_AWARE_HUD_API_TOKEN":             "secret-token",
+		"CAPACITY_AWARE_HUD_FAILURE_MULTIPLIER":    "5",
+		"CAPACITY_AWARE_HUD_FAILURE_BASE_CAPACITY": "15",
 	})
 
 	cfg := ConfigFromEnv()
@@ -107,6 +113,7 @@ func TestConfigFromEnv_AllSet(t *testing.T) {
 	assert.Equal(t, "8Gi", cfg.WorkflowMemory)
 	assert.Equal(t, 2, cfg.WorkflowGPU)
 	assert.Equal(t, "100Gi", cfg.WorkflowDisk)
+	assert.Equal(t, "numa-scheduler", cfg.WorkflowSchedulerName)
 	assert.Equal(t, "1", cfg.RunnerCPU)
 	assert.Equal(t, "1Gi", cfg.RunnerMemory)
 	assert.Equal(t, "gpu-fleet", cfg.NodeFleet)
@@ -114,15 +121,17 @@ func TestConfigFromEnv_AllSet(t *testing.T) {
 	assert.Equal(t, "gpu-large", cfg.RunnerClass)
 	assert.Equal(t, "secret-token", cfg.HUDAPIToken)
 	assert.Equal(t, 5, cfg.HUDFailureMultiplier)
+	assert.Equal(t, 15, cfg.HUDFailureBaseCapacity)
 }
 
 func TestConfigFromEnv_InvalidValues_FallbackToDefaults(t *testing.T) {
 	setEnvs(t, map[string]string{
-		"CAPACITY_AWARE_ENABLED":              "not-a-bool",
-		"CAPACITY_AWARE_PROACTIVE_CAPACITY":   "not-an-int",
-		"CAPACITY_AWARE_RECALCULATE_INTERVAL": "not-a-duration",
-		"CAPACITY_AWARE_PLACEHOLDER_TIMEOUT":  "999",
-		"CAPACITY_AWARE_WORKFLOW_GPU":         "abc",
+		"CAPACITY_AWARE_ENABLED":                   "not-a-bool",
+		"CAPACITY_AWARE_PROACTIVE_CAPACITY":        "not-an-int",
+		"CAPACITY_AWARE_RECALCULATE_INTERVAL":      "not-a-duration",
+		"CAPACITY_AWARE_PLACEHOLDER_TIMEOUT":       "999",
+		"CAPACITY_AWARE_WORKFLOW_GPU":              "abc",
+		"CAPACITY_AWARE_HUD_FAILURE_BASE_CAPACITY": "not-a-number",
 	})
 
 	cfg := ConfigFromEnv()
@@ -132,13 +141,15 @@ func TestConfigFromEnv_InvalidValues_FallbackToDefaults(t *testing.T) {
 	assert.Equal(t, 60*time.Second, cfg.RecalculateInterval, "invalid duration falls back to 60s")
 	assert.Equal(t, 5*time.Minute, cfg.PlaceholderTimeout, "invalid duration falls back to 5m")
 	assert.Equal(t, 0, cfg.WorkflowGPU, "invalid int falls back to 0")
+	assert.Equal(t, 0, cfg.HUDFailureBaseCapacity, "invalid int falls back to 0")
 }
 
 func TestConfigFromEnv_WhitespaceTrimmmed(t *testing.T) {
 	setEnvs(t, map[string]string{
-		"CAPACITY_AWARE_ENABLED":            "  true  ",
-		"CAPACITY_AWARE_PROACTIVE_CAPACITY": "  3  ",
-		"CAPACITY_AWARE_NODE_FLEET":         "  my-fleet  ",
+		"CAPACITY_AWARE_ENABLED":                   "  true  ",
+		"CAPACITY_AWARE_PROACTIVE_CAPACITY":        "  3  ",
+		"CAPACITY_AWARE_NODE_FLEET":                "  my-fleet  ",
+		"CAPACITY_AWARE_HUD_FAILURE_BASE_CAPACITY": "  7  ",
 	})
 
 	cfg := ConfigFromEnv()
@@ -146,6 +157,7 @@ func TestConfigFromEnv_WhitespaceTrimmmed(t *testing.T) {
 	assert.True(t, cfg.Enabled)
 	assert.Equal(t, 3, cfg.ProactiveCapacity)
 	assert.Equal(t, "my-fleet", cfg.NodeFleet)
+	assert.Equal(t, 7, cfg.HUDFailureBaseCapacity)
 }
 
 // Negative ProactiveCapacity must be clamped to 0 — never used as a
@@ -159,6 +171,19 @@ func TestConfigFromEnv_ProactiveCapacity_NegativeClampedToZero(t *testing.T) {
 
 	assert.Equal(t, 0, cfg.ProactiveCapacity,
 		"negative ProactiveCapacity must clamp to 0")
+}
+
+// Negative HUDFailureBaseCapacity must be clamped to 0 — same guard
+// rationale as ProactiveCapacity (no negative values downstream).
+func TestConfigFromEnv_HUDFailureBaseCapacity_NegativeClampedToZero(t *testing.T) {
+	setEnvs(t, map[string]string{
+		"CAPACITY_AWARE_HUD_FAILURE_BASE_CAPACITY": "-5",
+	})
+
+	cfg := ConfigFromEnv()
+
+	assert.Equal(t, 0, cfg.HUDFailureBaseCapacity,
+		"negative HUDFailureBaseCapacity must clamp to 0")
 }
 
 // HUDFailureMultiplier must be >= 1 — a value below 1 would never produce
@@ -224,6 +249,44 @@ func TestConfigFromEnv_ProactiveCapacity_AboveWarnAllowed(t *testing.T) {
 		"values between warn threshold and hard cap are allowed")
 }
 
+// Values above the hard cap (1000) must be clamped — protects against
+// runaway placeholder creation from a misconfiguration.
+func TestConfigFromEnv_HUDFailureBaseCapacity_AboveHardCapClamped(t *testing.T) {
+	setEnvs(t, map[string]string{
+		"CAPACITY_AWARE_HUD_FAILURE_BASE_CAPACITY": "5000",
+	})
+
+	cfg := ConfigFromEnv()
+
+	assert.Equal(t, proactiveCapacityHardCap, cfg.HUDFailureBaseCapacity,
+		"value above hard cap must clamp to %d", proactiveCapacityHardCap)
+}
+
+// Values exactly at the hard cap are allowed (boundary).
+func TestConfigFromEnv_HUDFailureBaseCapacity_AtHardCapAllowed(t *testing.T) {
+	setEnvs(t, map[string]string{
+		"CAPACITY_AWARE_HUD_FAILURE_BASE_CAPACITY": "1000",
+	})
+
+	cfg := ConfigFromEnv()
+
+	assert.Equal(t, proactiveCapacityHardCap, cfg.HUDFailureBaseCapacity,
+		"value exactly at hard cap must be preserved")
+}
+
+// Values above the warn threshold (100) but below the hard cap (1000)
+// are allowed unchanged — operators may legitimately need this in surge.
+func TestConfigFromEnv_HUDFailureBaseCapacity_AboveWarnAllowed(t *testing.T) {
+	setEnvs(t, map[string]string{
+		"CAPACITY_AWARE_HUD_FAILURE_BASE_CAPACITY": "250",
+	})
+
+	cfg := ConfigFromEnv()
+
+	assert.Equal(t, 250, cfg.HUDFailureBaseCapacity,
+		"values between warn threshold and hard cap are allowed")
+}
+
 // Validate() must enforce HUDFailureMultiplier >= 1 for callers that
 // construct Config programmatically (bypassing ConfigFromEnv's clamp).
 func TestConfig_Validate_HUDFailureMultiplierClampedBelowOne(t *testing.T) {
@@ -239,6 +302,15 @@ func TestConfig_Validate_HUDFailureMultiplierClampedBelowOne(t *testing.T) {
 		assert.Equal(t, 1, cfg.HUDFailureMultiplier,
 			"Validate must clamp negative HUDFailureMultiplier to 1")
 	})
+}
+
+// Validate() must clamp negative HUDFailureBaseCapacity to 0 for callers
+// that construct Config programmatically (bypassing ConfigFromEnv's clamp).
+func TestConfig_Validate_HUDFailureBaseCapacityClampedBelowZero(t *testing.T) {
+	cfg := Config{HUDFailureBaseCapacity: -7}
+	require.NoError(t, cfg.Validate())
+	assert.Equal(t, 0, cfg.HUDFailureBaseCapacity,
+		"Validate must clamp negative HUDFailureBaseCapacity to 0")
 }
 
 // Validate() clamps negative MaxRunners (set by main.go after env parse).

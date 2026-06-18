@@ -367,6 +367,147 @@ func TestReconcile_HUDDisabled_MultiplierDoesNotApply(t *testing.T) {
 	assert.Equal(t, 6, countPods(t, cs, "test-ns"))
 }
 
+// HUD failure fallback formula:
+//
+//	desiredPairs = ProactiveCapacity * HUDFailureMultiplier + HUDFailureBaseCapacity
+//
+// 3 * 3 + 5 = 14 pairs.
+func TestReconcile_HUDAPIFailure_FormulaIncludesBaseCapacity(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	cfg := Config{
+		ProactiveCapacity:      3,
+		HUDFailureMultiplier:   3,
+		HUDFailureBaseCapacity: 5,
+		MaxRunners:             50,
+		ScaleSetLabels:         []string{"linux.2xlarge"},
+		HUDAPIToken:            "test",
+		PlaceholderTimeout:     5 * time.Minute,
+	}
+	m, cs, _ := newTestMonitor(t, cfg, nil)
+	m.hudClient = NewHUDClient(srv.URL, "test")
+
+	m.reconcileProvisioning(context.Background())
+	m.reconcileReporting(context.Background())
+
+	// 3 * 3 + 5 = 14 pairs = 28 pods.
+	assert.Equal(t, 28, countPods(t, cs, "test-ns"),
+		"HUD-failure formula must be ProactiveCapacity*HUDFailureMultiplier+HUDFailureBaseCapacity")
+}
+
+// Core use case: HUDFailureBaseCapacity provides a fallback floor even
+// when ProactiveCapacity is 0 (multiplier path alone would yield 0).
+func TestReconcile_HUDAPIFailure_BaseCapacityWithProactiveZero(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	cfg := Config{
+		ProactiveCapacity:      0,
+		HUDFailureMultiplier:   3,
+		HUDFailureBaseCapacity: 10,
+		MaxRunners:             50,
+		ScaleSetLabels:         []string{"linux.2xlarge"},
+		HUDAPIToken:            "test",
+		PlaceholderTimeout:     5 * time.Minute,
+	}
+	m, cs, _ := newTestMonitor(t, cfg, nil)
+	m.hudClient = NewHUDClient(srv.URL, "test")
+
+	m.reconcileProvisioning(context.Background())
+	m.reconcileReporting(context.Background())
+
+	// 0 * 3 + 10 = 10 pairs = 20 pods. Validates the motivating use case:
+	// HUD-failure burst capacity without any always-on proactive baseline.
+	assert.Equal(t, 20, countPods(t, cs, "test-ns"),
+		"HUDFailureBaseCapacity must provide a floor when ProactiveCapacity=0")
+}
+
+// HUDFailureBaseCapacity contribution is still clamped by MaxRunners.
+func TestReconcile_HUDAPIFailure_BaseCapacityClampedByMaxRunners(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	cfg := Config{
+		ProactiveCapacity:      0,
+		HUDFailureMultiplier:   1,
+		HUDFailureBaseCapacity: 20,
+		MaxRunners:             5,
+		ScaleSetLabels:         []string{"linux.2xlarge"},
+		HUDAPIToken:            "test",
+		PlaceholderTimeout:     5 * time.Minute,
+	}
+	m, cs, _ := newTestMonitor(t, cfg, nil)
+	m.hudClient = NewHUDClient(srv.URL, "test")
+
+	m.reconcileProvisioning(context.Background())
+	m.reconcileReporting(context.Background())
+
+	// 0*1 + 20 = 20 desired, clamped to MaxRunners=5 -> 5 pairs = 10 pods.
+	assert.Equal(t, 10, countPods(t, cs, "test-ns"),
+		"HUDFailureBaseCapacity contribution must still be clamped by MaxRunners")
+}
+
+// Regression: HUDFailureBaseCapacity defaulting to 0 preserves the legacy
+// fallback formula (ProactiveCapacity * HUDFailureMultiplier). Pins
+// backward compatibility for existing deployments.
+func TestReconcile_HUDAPIFailure_BaseCapacityDefaultZeroPreservesLegacy(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	cfg := Config{
+		ProactiveCapacity:      3,
+		HUDFailureMultiplier:   3,
+		HUDFailureBaseCapacity: 0,
+		MaxRunners:             50,
+		ScaleSetLabels:         []string{"linux.2xlarge"},
+		HUDAPIToken:            "test",
+		PlaceholderTimeout:     5 * time.Minute,
+	}
+	m, cs, _ := newTestMonitor(t, cfg, nil)
+	m.hudClient = NewHUDClient(srv.URL, "test")
+
+	m.reconcileProvisioning(context.Background())
+	m.reconcileReporting(context.Background())
+
+	// 3 * 3 + 0 = 9 pairs = 18 pods (matches legacy behavior).
+	assert.Equal(t, 18, countPods(t, cs, "test-ns"),
+		"HUDFailureBaseCapacity=0 must preserve the legacy ProactiveCapacity*HUDFailureMultiplier formula")
+}
+
+// On the HUD-healthy path, HUDFailureBaseCapacity must NOT contribute —
+// the formula is the standard ProactiveCapacity + queuedJobs.
+func TestReconcile_HUDHealthy_BaseCapacityDoesNotApply(t *testing.T) {
+	hudRows := []QueuedJobsForRunner{
+		{RunnerLabel: "linux.2xlarge", NumQueuedJobs: 2},
+	}
+	cfg := Config{
+		ProactiveCapacity:      3,
+		HUDFailureMultiplier:   3,
+		HUDFailureBaseCapacity: 10,
+		MaxRunners:             50,
+		ScaleSetLabels:         []string{"linux.2xlarge"},
+		PlaceholderTimeout:     5 * time.Minute,
+	}
+	m, cs, _ := newTestMonitor(t, cfg, hudRows)
+
+	m.reconcileProvisioning(context.Background())
+	m.reconcileReporting(context.Background())
+
+	// HUD healthy -> desired = ProactiveCapacity(3) + queuedJobs(2) = 5 pairs
+	// = 10 pods. HUDFailureBaseCapacity is NOT added on the healthy path.
+	assert.Equal(t, 10, countPods(t, cs, "test-ns"),
+		"HUDFailureBaseCapacity must NOT contribute when HUD is healthy")
+}
+
 func TestReconcile_IdempotentWhenAtDesired(t *testing.T) {
 	cfg := Config{
 		ProactiveCapacity:  2,
@@ -695,14 +836,15 @@ func TestProvisioner_BrokenPair_DeleteFailure(t *testing.T) {
 type fakeCapacityRecorder struct {
 	mu sync.Mutex
 
-	proactiveCapacity    int
-	maxBurstCapacity     int
-	hudEnabled           bool
-	queuedJobs           int
-	desiredPairs         int
-	pairs                int
-	runningPairs         int
-	advertisedMaxRunners int
+	proactiveCapacity      int
+	maxBurstCapacity       int
+	hudFailureBaseCapacity int
+	hudEnabled             bool
+	queuedJobs             int
+	desiredPairs           int
+	pairs                  int
+	runningPairs           int
+	advertisedMaxRunners   int
 
 	// Map (role, phase) -> latest count.
 	placeholderPods map[string]map[string]int
@@ -711,22 +853,23 @@ type fakeCapacityRecorder struct {
 	lastSuccess map[string]time.Time
 
 	// Counts of method invocations for assertions.
-	setProactiveCapacityCalls    int
-	setMaxBurstCapacityCalls     int
-	setHUDEnabledCalls           int
-	setQueuedJobsCalls           int
-	setDesiredPairsCalls         int
-	setPairsCalls                int
-	setRunningPairsCalls         int
-	setPlaceholderPodsCalls      int
-	setAdvertisedMaxRunnersCalls int
-	setReconcileLastSuccessCalls map[string]int
-	observeReconcileCalls        map[string]int
-	observeHUDRequestCalls       map[string]int
-	incHUDRequestsCalls          map[string]int
-	incPairCreatesCalls          map[string]int
-	incPairDeletesCalls          map[string]int // key: reason+":"+result
-	incReconcileSkipsCalls       map[string]int
+	setProactiveCapacityCalls      int
+	setMaxBurstCapacityCalls       int
+	setHUDFailureBaseCapacityCalls int
+	setHUDEnabledCalls             int
+	setQueuedJobsCalls             int
+	setDesiredPairsCalls           int
+	setPairsCalls                  int
+	setRunningPairsCalls           int
+	setPlaceholderPodsCalls        int
+	setAdvertisedMaxRunnersCalls   int
+	setReconcileLastSuccessCalls   map[string]int
+	observeReconcileCalls          map[string]int
+	observeHUDRequestCalls         map[string]int
+	incHUDRequestsCalls            map[string]int
+	incPairCreatesCalls            map[string]int
+	incPairDeletesCalls            map[string]int // key: reason+":"+result
+	incReconcileSkipsCalls         map[string]int
 }
 
 func newFakeCapacityRecorder() *fakeCapacityRecorder {
@@ -754,6 +897,12 @@ func (f *fakeCapacityRecorder) SetMaxBurstCapacity(v int) {
 	defer f.mu.Unlock()
 	f.maxBurstCapacity = v
 	f.setMaxBurstCapacityCalls++
+}
+func (f *fakeCapacityRecorder) SetHUDFailureBaseCapacity(v int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.hudFailureBaseCapacity = v
+	f.setHUDFailureBaseCapacityCalls++
 }
 func (f *fakeCapacityRecorder) SetHUDEnabled(b bool) {
 	f.mu.Lock()

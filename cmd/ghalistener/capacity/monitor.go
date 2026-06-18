@@ -138,6 +138,7 @@ func New(
 	// scrapes even before the first reconcile cycle runs.
 	m.recorder.SetProactiveCapacity(m.config.ProactiveCapacity)
 	m.recorder.SetMaxBurstCapacity(m.config.MaxBurstCapacity)
+	m.recorder.SetHUDFailureBaseCapacity(m.config.HUDFailureBaseCapacity)
 	m.recorder.SetHUDEnabled(m.hudClient != nil && m.config.HUDAPIToken != "")
 	// Seed the reconcile-last-success gauges to listener-startup time so any
 	// `time() - metric` wedge alert has a sane floor (small at startup,
@@ -251,6 +252,7 @@ func (m *Monitor) Run(ctx context.Context) error {
 		"proactiveCapacity", m.config.ProactiveCapacity,
 		"maxRunners", m.config.MaxRunners,
 		"maxBurstCapacity", m.config.MaxBurstCapacity,
+		"hudFailureBaseCapacity", m.config.HUDFailureBaseCapacity,
 		"labels", m.config.ScaleSetLabels,
 		"workflowNodeFleet", m.config.NodeFleet,
 		"runnerNodeFleet", m.config.RunnerNodeFleet,
@@ -376,7 +378,7 @@ func (m *Monitor) reconcileProvisioning(ctx context.Context) {
 		var err error
 		queuedJobs, err = m.queryHUDWithRetry(ctx)
 		if err != nil {
-			m.logger.Warn("HUD API failed after retries, falling back to ProactiveCapacity * HUDFailureMultiplier", "error", err)
+			m.logger.Warn("HUD API failed after retries, falling back to ProactiveCapacity * HUDFailureMultiplier + HUDFailureBaseCapacity", "error", err)
 			m.recorder.IncReconcileSkips(skipReasonHUDAPIFailed)
 			queuedJobs = 0
 			hudFailed = true
@@ -469,7 +471,7 @@ func (m *Monitor) reconcileProvisioning(ctx context.Context) {
 	// Headroom and burst caps below still bound the absolute blast radius.
 	desiredPairs := m.config.ProactiveCapacity + queuedJobs
 	if hudFailed {
-		desiredPairs = m.config.ProactiveCapacity * m.config.HUDFailureMultiplier
+		desiredPairs = m.config.ProactiveCapacity*m.config.HUDFailureMultiplier + m.config.HUDFailureBaseCapacity
 	}
 
 	// Clamp by headroom against the hard runner cap. Real runner pods (running +
