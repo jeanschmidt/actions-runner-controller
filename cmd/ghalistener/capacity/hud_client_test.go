@@ -165,7 +165,7 @@ func TestGetQueuedJobsForLabels_SendsExpectedParameters(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, 0, got.QueuedThresholdMinutes, "any-duration queued jobs (OSDC override of server default=30)")
-	assert.Equal(t, 3, got.MaxAgeDays)
+	assert.Equal(t, 1, got.MaxAgeDays)
 	assert.Equal(t, []string{"pytorch"}, got.Orgs)
 	assert.Equal(t, "", got.Repo)
 	assert.Equal(t, []string{"l-x86iavx512-32-256", "self-hosted"}, got.RunnerLabels)
@@ -213,7 +213,7 @@ func TestBuildURL_OverwritesPreexistingParametersQuery(t *testing.T) {
 
 	// Stale values from the legacy URL must NOT leak through; we always
 	// emit the in-code defaults plus the per-request runnerLabels.
-	assert.Equal(t, 3, got.MaxAgeDays, "stale URL-embedded maxAgeDays must be ignored")
+	assert.Equal(t, 1, got.MaxAgeDays, "stale URL-embedded maxAgeDays must be ignored")
 	assert.Equal(t, []string{"pytorch"}, got.Orgs, "stale URL-embedded orgs must be ignored")
 	assert.Equal(t, []string{"label-1"}, got.RunnerLabels)
 }
@@ -264,7 +264,7 @@ func TestDefaultHUDRequestParams(t *testing.T) {
 	p := defaultHUDRequestParams()
 	assert.Equal(t, 0, p.QueuedThresholdMinutes,
 		"OSDC needs every queued job, not just >=30min (server default)")
-	assert.Equal(t, 3, p.MaxAgeDays)
+	assert.Equal(t, 1, p.MaxAgeDays)
 	assert.Equal(t, []string{"pytorch"}, p.Orgs)
 	assert.Equal(t, "", p.Repo)
 	assert.Nil(t, p.RunnerLabels, "RunnerLabels is filled in per-request")

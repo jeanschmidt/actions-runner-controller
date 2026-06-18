@@ -30,7 +30,7 @@ type hudRequestParams struct {
 func defaultHUDRequestParams() hudRequestParams {
 	return hudRequestParams{
 		QueuedThresholdMinutes: 0,
-		MaxAgeDays:             3,
+		MaxAgeDays:             1,
 		Orgs:                   []string{"pytorch"},
 		Repo:                   "",
 	}
