@@ -90,7 +90,7 @@ func ConfigFromEnv() Config {
 		Enabled:                envBool("CAPACITY_AWARE_ENABLED", false),
 		ProactiveCapacity:      envInt("CAPACITY_AWARE_PROACTIVE_CAPACITY", 0),
 		MaxBurstCapacity:       envInt("CAPACITY_AWARE_MAX_BURST_CAPACITY", 0),
-		RecalculateInterval:    envDuration("CAPACITY_AWARE_RECALCULATE_INTERVAL", 30*time.Second),
+		RecalculateInterval:    envDuration("CAPACITY_AWARE_RECALCULATE_INTERVAL", 60*time.Second),
 		ReportInterval:         envDuration("CAPACITY_AWARE_REPORT_INTERVAL", 5*time.Second),
 		PlaceholderTimeout:     envDuration("CAPACITY_AWARE_PLACEHOLDER_TIMEOUT", 5*time.Minute),
 		WorkflowCPU:            envString("CAPACITY_AWARE_WORKFLOW_CPU", ""),

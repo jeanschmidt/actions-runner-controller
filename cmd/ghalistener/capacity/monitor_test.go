@@ -1338,6 +1338,136 @@ func TestReconcile_MaxRunnersHeadroom_CountsPendingTowardCap(t *testing.T) {
 		"only 1 placeholder allowed: MaxRunners=10 minus 8 Running minus 1 Pending real runner pods")
 }
 
+// runProvisioner must respect ctx.Done() while waiting out the startup
+// jitter, so a listener shutting down during the jitter window exits
+// promptly instead of blocking for up to RecalculateInterval.
+func TestRunProvisioner_JitterRespectsContextCancellation(t *testing.T) {
+	cfg := Config{
+		ProactiveCapacity:   1,
+		MaxRunners:          5,
+		PlaceholderTimeout:  5 * time.Minute,
+		RecalculateInterval: 1 * time.Hour, // Force a long jitter window
+	}
+	m, _, _ := newTestMonitor(t, cfg, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		m.runProvisioner(ctx)
+		close(done)
+	}()
+
+	// Give the goroutine a moment to enter the jitter sleep, then cancel.
+	time.Sleep(20 * time.Millisecond)
+	cancel()
+
+	select {
+	case <-done:
+		// Good — exited promptly after cancel.
+	case <-time.After(2 * time.Second):
+		t.Fatal("runProvisioner did not exit within 2s after ctx cancel; jitter likely blocking")
+	}
+}
+
+// The jitter window must be bounded by RecalculateInterval. With a tiny
+// interval, the first reconcileProvisioning tick must fire quickly — this
+// guards against an accidental jitter > interval misconfiguration that
+// would stretch the first tick out to multiple intervals.
+func TestRunProvisioner_JitterBoundedByInterval(t *testing.T) {
+	cfg := Config{
+		ProactiveCapacity:   1,
+		MaxRunners:          5,
+		PlaceholderTimeout:  5 * time.Minute,
+		RecalculateInterval: 50 * time.Millisecond,
+	}
+	m, _, _ := newTestMonitor(t, cfg, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go m.runProvisioner(ctx)
+
+	// jitter is in [0, 50ms); first ticker fire is jitter + 50ms.
+	// Allow generous wall-clock slack for CI noise but still tight enough
+	// that an unbounded jitter (e.g. accidentally using the full ticker
+	// duration twice) would fail.
+	deadline := time.After(500 * time.Millisecond)
+	for {
+		pairs, err := m.placeholders.ListPairs(context.Background())
+		require.NoError(t, err)
+		if len(pairs) > 0 {
+			return // First reconcile fired and created the proactive pair.
+		}
+		select {
+		case <-deadline:
+			t.Fatal("first provisioner tick did not fire within 500ms; jitter likely unbounded")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+}
+
+// pickJitter must return values strictly within [0, interval) and produce
+// a non-degenerate distribution across many calls. Without spread, 50
+// listeners would all land on the same delay and the desync goal fails.
+func TestPickJitter_RandomizedAndInBounds(t *testing.T) {
+	const interval = 100 * time.Millisecond
+	const samples = 256
+
+	buckets := make(map[time.Duration]struct{}, samples)
+	for i := 0; i < samples; i++ {
+		j := pickJitter(interval)
+		assert.GreaterOrEqual(t, j, time.Duration(0),
+			"jitter must be non-negative")
+		assert.Less(t, j, interval,
+			"jitter must be strictly less than interval")
+		buckets[j.Round(time.Millisecond)] = struct{}{}
+	}
+	// Uniform over [0, 100ms) bucketed to 1ms should populate most buckets
+	// in 256 samples; require well over a handful to catch a degenerate
+	// "always zero" or "always interval/2" implementation.
+	assert.Greater(t, len(buckets), 32,
+		"jitter must spread across [0, interval); got %d unique 1ms buckets", len(buckets))
+}
+
+// Zero or negative interval is a misconfiguration; pickJitter must
+// degrade to 0 rather than panic via rand.Int64N(0).
+func TestPickJitter_NonPositiveInterval(t *testing.T) {
+	assert.Equal(t, time.Duration(0), pickJitter(0))
+	assert.Equal(t, time.Duration(0), pickJitter(-time.Second))
+}
+
+// time.NewTicker(0) panics, so a 0 RecalculateInterval misconfig must be
+// handled before the ticker is created. runProvisioner should still do the
+// initial reconcile and then park on ctx instead of crashing the listener.
+func TestRunProvisioner_ZeroIntervalDoesNotPanic(t *testing.T) {
+	cfg := Config{
+		ProactiveCapacity:   1,
+		MaxRunners:          5,
+		PlaceholderTimeout:  5 * time.Minute,
+		RecalculateInterval: 0,
+	}
+	m, _, _ := newTestMonitor(t, cfg, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	done := make(chan struct{})
+	go func() {
+		m.runProvisioner(ctx)
+		close(done)
+	}()
+
+	// Give the goroutine time to do the initial reconcile and park on ctx.
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("runProvisioner did not exit within 2s after ctx cancel")
+	}
+}
+
 // Edge case: real runner pods have already exhausted (or exceeded) MaxRunners.
 // The headroom subtraction goes negative -> max(0) clamps it -> desiredPairs=0,
 // no placeholders are created. Prevents over-provisioning when the cap is hit.

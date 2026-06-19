@@ -6,23 +6,36 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"time"
 )
 
 const (
-	// queuedThresholdMinutes=0: include jobs queued for any duration
-	// maxAgeDays=3: look at the last 3 days of data
-	// orgs=["pytorch"]: scope to the pytorch GitHub org
-	// repo="": all repos in the org
-	defaultHUDAPIURL = "https://hud.pytorch.org/api/clickhouse/queued_jobs_aggregate" +
-		"?parameters=%7B%22queuedThresholdMinutes%22%3A0%2C%22maxAgeDays%22%3A3%2C%22orgs%22%3A%5B%22pytorch%22%5D%2C%22repo%22%3A%22%22%7D"
-	// hudResponseMaxBytes caps the JSON payload we will read from the
-	// HUD API. A misbehaving or compromised endpoint must not be able
-	// to OOM the listener by streaming an unbounded response.
-	hudResponseMaxBytes = 10 * 1024 * 1024 // 10 MiB
+	defaultHUDAPIURL = "https://hud.pytorch.org/api/clickhouse/queued_jobs_aggregate"
+	// Vercel Pro/Enterprise caps serverless function responses at 4.5 MB.
+	// hud.pytorch.org runs on Vercel, so any real response is below this;
+	// the cap is the listener's own guard against OOM if HUD moves off
+	// Vercel or returns a runaway payload.
+	hudResponseMaxBytes = 4_500_000
 )
 
-// QueuedJobsForRunner represents a single row from the HUD API response.
+type hudRequestParams struct {
+	QueuedThresholdMinutes int      `json:"queuedThresholdMinutes"`
+	MaxAgeDays             int      `json:"maxAgeDays"`
+	Orgs                   []string `json:"orgs"`
+	Repo                   string   `json:"repo"`
+	RunnerLabels           []string `json:"runnerLabels"`
+}
+
+func defaultHUDRequestParams() hudRequestParams {
+	return hudRequestParams{
+		QueuedThresholdMinutes: 0,
+		MaxAgeDays:             1,
+		Orgs:                   []string{"pytorch"},
+		Repo:                   "",
+	}
+}
+
 type QueuedJobsForRunner struct {
 	RunnerLabel         string  `json:"runner_label"`
 	Org                 string  `json:"org"`
@@ -32,32 +45,57 @@ type QueuedJobsForRunner struct {
 	MaxQueueTimeMinutes float64 `json:"max_queue_time_minutes"`
 }
 
-// HUDClient is an HTTP client for the PyTorch HUD API that returns
-// aggregate queued job counts per runner label.
 type HUDClient struct {
 	url    string
 	token  string
 	client *http.Client
 }
 
-// NewHUDClient creates a new HUD API client with the given auth token.
-func NewHUDClient(url, token string) *HUDClient {
+func NewHUDClient(hudURL, token string) *HUDClient {
 	return &HUDClient{
-		url:    url,
+		url:    hudURL,
 		token:  token,
 		client: &http.Client{Timeout: 10 * time.Second},
 	}
 }
 
-// GetQueuedJobsForLabels queries the HUD API and returns the total
-// number of queued jobs matching any of the provided runner labels.
-// On any error the caller receives (0, err) and decides the fallback.
+func (c *HUDClient) buildURL(labels []string) (string, error) {
+	p := defaultHUDRequestParams()
+	if labels == nil {
+		// Marshal as `[]`, not `null`.
+		labels = []string{}
+	}
+	p.RunnerLabels = labels
+
+	encoded, err := json.Marshal(p)
+	if err != nil {
+		return "", fmt.Errorf("encoding HUD parameters: %w", err)
+	}
+
+	u, err := url.Parse(c.url)
+	if err != nil {
+		return "", fmt.Errorf("parsing HUD URL: %w", err)
+	}
+	q := u.Query()
+	q.Set("parameters", string(encoded))
+	u.RawQuery = q.Encode()
+	return u.String(), nil
+}
+
+// GetQueuedJobsForLabels pushes labels into the request's runnerLabels so
+// the server filters server-side. The local re-filter below is defense in
+// depth against a future server-side regression that ignores the filter.
 func (c *HUDClient) GetQueuedJobsForLabels(ctx context.Context, labels []string) (int, error) {
 	if len(labels) == 0 {
 		return 0, nil
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.url, nil)
+	reqURL, err := c.buildURL(labels)
+	if err != nil {
+		return 0, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
 	if err != nil {
 		return 0, fmt.Errorf("building HUD request: %w", err)
 	}
@@ -74,8 +112,7 @@ func (c *HUDClient) GetQueuedJobsForLabels(ctx context.Context, labels []string)
 	}
 
 	var rows []QueuedJobsForRunner
-	body := io.LimitReader(resp.Body, hudResponseMaxBytes)
-	if err := json.NewDecoder(body).Decode(&rows); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, hudResponseMaxBytes)).Decode(&rows); err != nil {
 		return 0, fmt.Errorf("decoding HUD response: %w", err)
 	}
 
