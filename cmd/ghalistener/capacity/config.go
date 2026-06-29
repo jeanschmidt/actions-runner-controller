@@ -79,6 +79,21 @@ type Config struct {
 	// flat surge floor even when ProactiveCapacity is 0 (where the
 	// multiplier alone would yield 0). Clamped to [0, proactiveCapacityHardCap].
 	HUDFailureBaseCapacity int
+
+	// ClusterIndex is this cluster's position in [0, ClusterCount). Used to
+	// deterministically slice the fresh portion of the HUD-reported queue
+	// across peer clusters that all serve the same runner labels.
+	ClusterIndex int
+
+	// ClusterCount is the number of peer clusters serving the same labels.
+	// When ClusterCount > 1 and AgeThresholdSeconds > 0, each cluster claims
+	// only its 1/ClusterCount slice of fresh jobs (plus 100% of aged jobs).
+	ClusterCount int
+
+	// AgeThresholdSeconds is the queue-age boundary between "fresh" jobs
+	// (sharded across clusters) and "aged" jobs (claimed in full by every
+	// cluster). 0 disables sharding entirely.
+	AgeThresholdSeconds int
 }
 
 // ConfigFromEnv reads capacity monitor configuration from environment
@@ -107,6 +122,9 @@ func ConfigFromEnv() Config {
 		HUDAPIToken:            envString("CAPACITY_AWARE_HUD_API_TOKEN", ""),
 		HUDFailureMultiplier:   envInt("CAPACITY_AWARE_HUD_FAILURE_MULTIPLIER", defaultHUDFailureMultiplier),
 		HUDFailureBaseCapacity: envInt("CAPACITY_AWARE_HUD_FAILURE_BASE_CAPACITY", 0),
+		ClusterIndex:           envInt("CAPACITY_AWARE_CLUSTER_INDEX", 0),
+		ClusterCount:           envInt("CAPACITY_AWARE_CLUSTER_COUNT", 1),
+		AgeThresholdSeconds:    envInt("CAPACITY_AWARE_AGE_THRESHOLD_SECONDS", 0),
 	}
 
 	if c.ProactiveCapacity < 0 {
@@ -143,6 +161,8 @@ func ConfigFromEnv() Config {
 			"value", c.HUDFailureBaseCapacity, "warnThreshold", proactiveCapacityWarnThreshold)
 	}
 
+	clampShardingFields(&c)
+
 	return c
 }
 
@@ -171,6 +191,8 @@ func (c *Config) Validate() error {
 			"original", c.HUDFailureBaseCapacity)
 		c.HUDFailureBaseCapacity = 0
 	}
+
+	clampShardingFields(c)
 
 	if c.Enabled && c.RunnerNodeFleet == "" {
 		// Hard requirement: the runner-pool fleet drives placeholder-runner
@@ -225,4 +247,39 @@ func envDuration(key string, fallback time.Duration) time.Duration {
 		return fallback
 	}
 	return d
+}
+
+// clampShardingFields normalises the three cluster-aware sharding knobs so
+// downstream arithmetic (ClusterIndex / ClusterCount, modulo, slice math)
+// never encounters values that would underflow or panic. Callers that pass
+// in nonsensical values get warn-and-clamp behaviour rather than a runtime
+// error.
+func clampShardingFields(c *Config) {
+	if c.ClusterCount < 1 {
+		slog.Warn("ClusterCount must be >= 1, clamping",
+			"original", c.ClusterCount, "clampedTo", 1)
+		c.ClusterCount = 1
+	}
+	if c.ClusterIndex < 0 {
+		slog.Warn("ClusterIndex is negative, clamping to 0",
+			"original", c.ClusterIndex)
+		c.ClusterIndex = 0
+	}
+	if c.ClusterIndex >= c.ClusterCount {
+		slog.Warn("ClusterIndex must be < ClusterCount, clamping",
+			"originalIndex", c.ClusterIndex,
+			"clusterCount", c.ClusterCount,
+			"clampedTo", c.ClusterCount-1)
+		c.ClusterIndex = c.ClusterCount - 1
+	}
+	if c.AgeThresholdSeconds < 0 {
+		slog.Warn("AgeThresholdSeconds is negative, clamping to 0",
+			"original", c.AgeThresholdSeconds)
+		c.AgeThresholdSeconds = 0
+	}
+	if c.AgeThresholdSeconds > 0 && c.AgeThresholdSeconds < 60 {
+		slog.Warn("AgeThresholdSeconds below 60 rounds down to 0 minutes in the HUD API (which uses minute granularity) and would make every cluster claim 100% of the queue as aged, disabling sharding; clamping to 60",
+			"original", c.AgeThresholdSeconds, "clampedTo", 60)
+		c.AgeThresholdSeconds = 60
+	}
 }

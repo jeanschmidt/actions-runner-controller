@@ -59,8 +59,9 @@ func NewHUDClient(hudURL, token string) *HUDClient {
 	}
 }
 
-func (c *HUDClient) buildURL(labels []string) (string, error) {
+func (c *HUDClient) buildURL(labels []string, thresholdMinutes int) (string, error) {
 	p := defaultHUDRequestParams()
+	p.QueuedThresholdMinutes = thresholdMinutes
 	if labels == nil {
 		// Marshal as `[]`, not `null`.
 		labels = []string{}
@@ -86,11 +87,18 @@ func (c *HUDClient) buildURL(labels []string) (string, error) {
 // the server filters server-side. The local re-filter below is defense in
 // depth against a future server-side regression that ignores the filter.
 func (c *HUDClient) GetQueuedJobsForLabels(ctx context.Context, labels []string) (int, error) {
+	return c.GetQueuedJobsForLabelsWithThreshold(ctx, labels, 0)
+}
+
+// GetQueuedJobsForLabelsWithThreshold sends thresholdMinutes to HUD as
+// queuedThresholdMinutes; only jobs queued for at least that long are
+// counted. thresholdMinutes=0 means count every queued job.
+func (c *HUDClient) GetQueuedJobsForLabelsWithThreshold(ctx context.Context, labels []string, thresholdMinutes int) (int, error) {
 	if len(labels) == 0 {
 		return 0, nil
 	}
 
-	reqURL, err := c.buildURL(labels)
+	reqURL, err := c.buildURL(labels, thresholdMinutes)
 	if err != nil {
 		return 0, err
 	}

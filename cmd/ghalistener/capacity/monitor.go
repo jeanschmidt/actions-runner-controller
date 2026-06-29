@@ -220,6 +220,10 @@ func (m *Monitor) countRunnersByPhaseWithRetry(ctx context.Context, maxRetries i
 }
 
 func (m *Monitor) queryHUDWithRetry(ctx context.Context) (int, error) {
+	return m.queryHUDWithRetryAtThreshold(ctx, 0)
+}
+
+func (m *Monitor) queryHUDWithRetryAtThreshold(ctx context.Context, thresholdMinutes int) (int, error) {
 	var count int
 	err := retryWithBackoff(ctx, m.logger, "hud-api", provisionerMaxRetries, func() error {
 		// Per-attempt instrumentation: each HTTP attempt is one
@@ -229,7 +233,7 @@ func (m *Monitor) queryHUDWithRetry(ctx context.Context) (int, error) {
 		// the failed ones) — which is what the dashboard wants.
 		start := time.Now()
 		var e error
-		count, e = m.hudClient.GetQueuedJobsForLabels(ctx, m.config.ScaleSetLabels)
+		count, e = m.hudClient.GetQueuedJobsForLabelsWithThreshold(ctx, m.config.ScaleSetLabels, thresholdMinutes)
 		result := resultSuccess
 		if e != nil {
 			result = resultError
@@ -374,14 +378,44 @@ func (m *Monitor) reconcileProvisioning(ctx context.Context) {
 	// 1. Query HUD API with retry (graceful fallback handled below).
 	queuedJobs := 0
 	hudFailed := false
+	shardingActive := false
+	var nTotal, nAged, nFresh, mySlice int
 	if m.hudClient != nil && m.config.HUDAPIToken != "" {
-		var err error
-		queuedJobs, err = m.queryHUDWithRetry(ctx)
-		if err != nil {
-			m.logger.Warn("HUD API failed after retries, falling back to ProactiveCapacity * HUDFailureMultiplier + HUDFailureBaseCapacity", "error", err)
-			m.recorder.IncReconcileSkips(skipReasonHUDAPIFailed)
-			queuedJobs = 0
-			hudFailed = true
+		if m.config.AgeThresholdSeconds > 0 && m.config.ClusterCount > 1 {
+			shardingActive = true
+			thresholdMinutes := m.config.AgeThresholdSeconds / 60
+			var err error
+			nTotal, err = m.queryHUDWithRetryAtThreshold(ctx, 0)
+			if err != nil {
+				m.logger.Warn("HUD API (nTotal) failed after retries, falling back to ProactiveCapacity * HUDFailureMultiplier + HUDFailureBaseCapacity", "error", err)
+				m.recorder.IncReconcileSkips(skipReasonHUDAPIFailed)
+				queuedJobs = 0
+				hudFailed = true
+			} else {
+				nAged, err = m.queryHUDWithRetryAtThreshold(ctx, thresholdMinutes)
+				if err != nil {
+					m.logger.Warn("HUD API (nAged) failed after retries, falling back to ProactiveCapacity * HUDFailureMultiplier + HUDFailureBaseCapacity", "error", err)
+					m.recorder.IncReconcileSkips(skipReasonHUDAPIFailed)
+					queuedJobs = 0
+					hudFailed = true
+				} else {
+					nFresh = max(0, nTotal-nAged)
+					mySlice = nFresh / m.config.ClusterCount
+					if m.config.ClusterIndex < (nFresh % m.config.ClusterCount) {
+						mySlice++
+					}
+					queuedJobs = mySlice + nAged
+				}
+			}
+		} else {
+			var err error
+			queuedJobs, err = m.queryHUDWithRetry(ctx)
+			if err != nil {
+				m.logger.Warn("HUD API failed after retries, falling back to ProactiveCapacity * HUDFailureMultiplier + HUDFailureBaseCapacity", "error", err)
+				m.recorder.IncReconcileSkips(skipReasonHUDAPIFailed)
+				queuedJobs = 0
+				hudFailed = true
+			}
 		}
 	}
 	// Set even on the failure path — queuedJobs is 0 in that case, which
@@ -496,7 +530,7 @@ func (m *Monitor) reconcileProvisioning(ctx context.Context) {
 	// 6. Adjust: create or delete pairs.
 	m.adjustPairs(ctx, pairs, currentPairs, desiredPairs)
 
-	m.logger.Info("provisioning reconciled",
+	logAttrs := []any{
 		"queuedJobs", queuedJobs,
 		"hudFailed", hudFailed,
 		"desiredPairs", desiredPairs,
@@ -504,7 +538,18 @@ func (m *Monitor) reconcileProvisioning(ctx context.Context) {
 		"runningRunnerPods", runningRunnerPods,
 		"pendingRunnerPods", pendingRunnerPods,
 		"maxBurstCapacity", m.config.MaxBurstCapacity,
-	)
+	}
+	if shardingActive {
+		logAttrs = append(logAttrs,
+			"clusterIndex", m.config.ClusterIndex,
+			"clusterCount", m.config.ClusterCount,
+			"nTotal", nTotal,
+			"nAged", nAged,
+			"nFresh", nFresh,
+			"mySlice", mySlice,
+		)
+	}
+	m.logger.Info("provisioning reconciled", logAttrs...)
 	// Mark success only at the end of a fully completed cycle. Early-exit
 	// paths above (list-pairs error) do NOT mark success — the whole point
 	// of this metric is to detect when reconciles stop succeeding.

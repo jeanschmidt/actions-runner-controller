@@ -1494,3 +1494,183 @@ func TestReconcile_MaxRunnersHeadroom_AtOrAboveCapFloorsAtZero(t *testing.T) {
 	assert.Empty(t, pairs,
 		"total runner pods (12) >= MaxRunners (10) must floor desiredPairs to 0")
 }
+
+// newShardingTestMonitor wires the monitor to a HUD test server whose
+// response varies by the queuedThresholdMinutes parameter:
+//   - threshold == 0 returns nTotal rows
+//   - threshold > 0 returns nAged rows
+func newShardingTestMonitor(
+	t *testing.T,
+	cfg Config,
+	label string,
+	nTotal, nAged int,
+) (*Monitor, *fake.Clientset, *atomic.Int32) {
+	t.Helper()
+	if cfg.Namespace == "" {
+		cfg.Namespace = "test-ns"
+	}
+	if cfg.ScaleSetName == "" {
+		cfg.ScaleSetName = "test-sset"
+	}
+	if cfg.HUDAPIToken == "" {
+		cfg.HUDAPIToken = "test"
+	}
+	cs := newFakeClientset()
+
+	var maxRunnersVal atomic.Int32
+	setMax := func(v int) { maxRunnersVal.Store(int32(v)) }
+
+	logger := discardLogger
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paramsRaw := r.URL.Query().Get("parameters")
+		var got struct {
+			QueuedThresholdMinutes int `json:"queuedThresholdMinutes"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(paramsRaw), &got))
+		count := nTotal
+		if got.QueuedThresholdMinutes > 0 {
+			count = nAged
+		}
+		w.WriteHeader(http.StatusOK)
+		require.NoError(t, json.NewEncoder(w).Encode([]QueuedJobsForRunner{
+			{RunnerLabel: label, NumQueuedJobs: count},
+		}))
+	}))
+	t.Cleanup(srv.Close)
+
+	m := &Monitor{
+		config: cfg,
+		placeholders: NewPlaceholderManager(
+			cs, cfg.Namespace, "test-listener", cfg, logger,
+		),
+		hudClient:     NewHUDClient(srv.URL, "test"),
+		clientset:     cs,
+		setMaxRunners: setMax,
+		logger:        logger.With("component", "capacity-monitor"),
+		recorder:      metrics.DiscardCapacity,
+	}
+	return m, cs, &maxRunnersVal
+}
+
+// Sharding: even split with no remainder. nFresh=10, ClusterCount=2 →
+// index 0 takes 5, no aged jobs → queuedJobs=5.
+func TestReconcile_Sharding_EvenSplit_Index0(t *testing.T) {
+	cfg := Config{
+		ProactiveCapacity:   0,
+		MaxRunners:          100,
+		ScaleSetLabels:      []string{"linux.2xlarge"},
+		PlaceholderTimeout:  5 * time.Minute,
+		ClusterIndex:        0,
+		ClusterCount:        2,
+		AgeThresholdSeconds: 900,
+	}
+	m, cs, _ := newShardingTestMonitor(t, cfg, "linux.2xlarge", 10, 0)
+	m.reconcileProvisioning(context.Background())
+
+	// nFresh=10, mySlice=10/2=5, 0 < 10%2=0? no -> 5; queued=5+0=5 -> 10 pods
+	assert.Equal(t, 10, countPods(t, cs, "test-ns"))
+}
+
+// Sharding: remainder distribution. nFresh=11, ClusterCount=2 →
+// index 0 gets the +1 (6), index 1 gets 5. This test pins index 1.
+func TestReconcile_Sharding_RemainderToLowerIndex_Index1(t *testing.T) {
+	cfg := Config{
+		ProactiveCapacity:   0,
+		MaxRunners:          100,
+		ScaleSetLabels:      []string{"linux.2xlarge"},
+		PlaceholderTimeout:  5 * time.Minute,
+		ClusterIndex:        1,
+		ClusterCount:        2,
+		AgeThresholdSeconds: 900,
+	}
+	m, cs, _ := newShardingTestMonitor(t, cfg, "linux.2xlarge", 11, 0)
+	m.reconcileProvisioning(context.Background())
+
+	// nFresh=11, mySlice=11/2=5, 1 < 11%2=1? no -> 5; queued=5+0=5 -> 10 pods
+	assert.Equal(t, 10, countPods(t, cs, "test-ns"))
+}
+
+// Sharding with aged jobs: aged are claimed in full by every cluster,
+// fresh are sliced. Index 2 of 3, nTotal=10, nAged=3 → nFresh=7,
+// mySlice=7/3=2 (index 2 doesn't get the remainder since 2 >= 7%3=1),
+// queued = 2 + 3 = 5.
+func TestReconcile_Sharding_WithAgedJobs(t *testing.T) {
+	cfg := Config{
+		ProactiveCapacity:   0,
+		MaxRunners:          100,
+		ScaleSetLabels:      []string{"linux.2xlarge"},
+		PlaceholderTimeout:  5 * time.Minute,
+		ClusterIndex:        2,
+		ClusterCount:        3,
+		AgeThresholdSeconds: 900,
+	}
+	m, cs, _ := newShardingTestMonitor(t, cfg, "linux.2xlarge", 10, 3)
+	m.reconcileProvisioning(context.Background())
+
+	// nFresh=7, mySlice=7/3=2, 2 < 7%3=1? no -> 2; queued=2+3=5 -> 10 pods
+	assert.Equal(t, 10, countPods(t, cs, "test-ns"))
+}
+
+// Sharding: nAged > nTotal would otherwise produce negative nFresh.
+// max(0, nTotal-nAged) clamps it; aged are still claimed in full.
+func TestReconcile_Sharding_AgedExceedsTotal_ClampsFresh(t *testing.T) {
+	cfg := Config{
+		ProactiveCapacity:   0,
+		MaxRunners:          100,
+		ScaleSetLabels:      []string{"linux.2xlarge"},
+		PlaceholderTimeout:  5 * time.Minute,
+		ClusterIndex:        0,
+		ClusterCount:        2,
+		AgeThresholdSeconds: 900,
+	}
+	m, cs, _ := newShardingTestMonitor(t, cfg, "linux.2xlarge", 10, 15)
+	m.reconcileProvisioning(context.Background())
+
+	// nFresh=max(0,10-15)=0, mySlice=0, queued=0+15=15 -> 30 pods
+	assert.Equal(t, 30, countPods(t, cs, "test-ns"))
+}
+
+// Sharding disabled: AgeThreshold=0 must fall through to the legacy
+// single-query path even when ClusterCount > 1. The HUD server returns
+// `nTotal` (threshold=0 reply) — but with sharding disabled the monitor
+// must consume that count whole, ignoring the aged-query path entirely.
+func TestReconcile_Sharding_DisabledByZeroAgeThreshold(t *testing.T) {
+	cfg := Config{
+		ProactiveCapacity:   0,
+		MaxRunners:          100,
+		ScaleSetLabels:      []string{"linux.2xlarge"},
+		PlaceholderTimeout:  5 * time.Minute,
+		ClusterIndex:        0,
+		ClusterCount:        5,
+		AgeThresholdSeconds: 0,
+	}
+	m, cs, _ := newShardingTestMonitor(t, cfg, "linux.2xlarge", 8, 99)
+	m.reconcileProvisioning(context.Background())
+
+	// Sharding disabled -> queued = nTotal = 8 -> 16 pods.
+	// If sharding were active, queued would be 8/5+99 (way higher).
+	assert.Equal(t, 16, countPods(t, cs, "test-ns"),
+		"AgeThreshold=0 must short-circuit to the single-query (legacy) path")
+}
+
+// Sharding disabled: ClusterCount=1 must fall through to the legacy path
+// even when AgeThreshold is set — a single-cluster deployment has nothing
+// to shard. (1/1 = 1, but we still skip the second HUD call entirely.)
+func TestReconcile_Sharding_DisabledBySingleCluster(t *testing.T) {
+	cfg := Config{
+		ProactiveCapacity:   0,
+		MaxRunners:          100,
+		ScaleSetLabels:      []string{"linux.2xlarge"},
+		PlaceholderTimeout:  5 * time.Minute,
+		ClusterIndex:        0,
+		ClusterCount:        1,
+		AgeThresholdSeconds: 900,
+	}
+	m, cs, _ := newShardingTestMonitor(t, cfg, "linux.2xlarge", 8, 99)
+	m.reconcileProvisioning(context.Background())
+
+	// Sharding disabled -> queued = nTotal = 8 -> 16 pods.
+	assert.Equal(t, 16, countPods(t, cs, "test-ns"),
+		"ClusterCount=1 must short-circuit to the single-query (legacy) path")
+}
