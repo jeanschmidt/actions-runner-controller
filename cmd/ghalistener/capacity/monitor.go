@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"math"
 	"math/rand/v2"
 	"os"
 	"sync/atomic"
@@ -379,7 +380,7 @@ func (m *Monitor) reconcileProvisioning(ctx context.Context) {
 	queuedJobs := 0
 	hudFailed := false
 	shardingActive := false
-	var nTotal, nAged, nFresh, mySlice int
+	var nTotal, nAged, nFresh, mySlice, adjustedFresh, agedClaim int
 	if m.hudClient != nil && m.config.HUDAPIToken != "" {
 		if m.config.AgeThresholdSeconds > 0 && m.config.ClusterCount > 1 {
 			shardingActive = true
@@ -400,11 +401,13 @@ func (m *Monitor) reconcileProvisioning(ctx context.Context) {
 					hudFailed = true
 				} else {
 					nFresh = max(0, nTotal-nAged)
-					mySlice = nFresh / m.config.ClusterCount
-					if m.config.ClusterIndex < (nFresh % m.config.ClusterCount) {
+					adjustedFresh = int(math.Round(float64(nFresh) * m.config.FreshMultiplier))
+					mySlice = adjustedFresh / m.config.ClusterCount
+					if m.config.ClusterIndex < (adjustedFresh % m.config.ClusterCount) {
 						mySlice++
 					}
-					queuedJobs = mySlice + nAged
+					agedClaim = int(math.Round(float64(nAged) * m.config.AgedMultiplier))
+					queuedJobs = mySlice + agedClaim
 				}
 			}
 		} else {
@@ -415,6 +418,8 @@ func (m *Monitor) reconcileProvisioning(ctx context.Context) {
 				m.recorder.IncReconcileSkips(skipReasonHUDAPIFailed)
 				queuedJobs = 0
 				hudFailed = true
+			} else {
+				queuedJobs = int(math.Round(float64(queuedJobs) * m.config.FreshMultiplier))
 			}
 		}
 	}
@@ -547,6 +552,10 @@ func (m *Monitor) reconcileProvisioning(ctx context.Context) {
 			"nAged", nAged,
 			"nFresh", nFresh,
 			"mySlice", mySlice,
+			"freshMultiplier", m.config.FreshMultiplier,
+			"agedMultiplier", m.config.AgedMultiplier,
+			"adjustedFresh", adjustedFresh,
+			"agedClaim", agedClaim,
 		)
 	}
 	m.logger.Info("provisioning reconciled", logAttrs...)

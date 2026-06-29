@@ -1,6 +1,7 @@
 package capacity
 
 import (
+	"math"
 	"os"
 	"testing"
 	"time"
@@ -394,9 +395,9 @@ func TestConfigFromEnv_RunnerNodeFleet_WhitespaceTrimmed(t *testing.T) {
 // values intact (no clamping when the values are already in-range).
 func TestConfigFromEnv_Sharding_AllSet(t *testing.T) {
 	setEnvs(t, map[string]string{
-		"CAPACITY_AWARE_CLUSTER_INDEX":          "1",
-		"CAPACITY_AWARE_CLUSTER_COUNT":          "3",
-		"CAPACITY_AWARE_AGE_THRESHOLD_SECONDS":  "900",
+		"CAPACITY_AWARE_CLUSTER_INDEX":         "1",
+		"CAPACITY_AWARE_CLUSTER_COUNT":         "3",
+		"CAPACITY_AWARE_AGE_THRESHOLD_SECONDS": "900",
 	})
 
 	cfg := ConfigFromEnv()
@@ -508,4 +509,104 @@ func TestConfig_Validate_ShardingClamps(t *testing.T) {
 	require.NoError(t, cfg.Validate())
 	assert.Equal(t, 2, cfg.ClusterCount)
 	assert.Equal(t, 1, cfg.ClusterIndex, "Validate must clamp ClusterIndex to ClusterCount-1")
+}
+
+func TestConfigFromEnv_Multipliers_AllSet(t *testing.T) {
+	setEnvs(t, map[string]string{
+		"CAPACITY_AWARE_FRESH_MULTIPLIER": "0.5",
+		"CAPACITY_AWARE_AGED_MULTIPLIER":  "1.5",
+	})
+
+	cfg := ConfigFromEnv()
+
+	assert.Equal(t, 0.5, cfg.FreshMultiplier)
+	assert.Equal(t, 1.5, cfg.AgedMultiplier)
+}
+
+func TestConfigFromEnv_Multipliers_Defaults(t *testing.T) {
+	unsetEnvs(t, []string{
+		"CAPACITY_AWARE_FRESH_MULTIPLIER",
+		"CAPACITY_AWARE_AGED_MULTIPLIER",
+	})
+
+	cfg := ConfigFromEnv()
+
+	assert.Equal(t, 1.0, cfg.FreshMultiplier)
+	assert.Equal(t, 1.0, cfg.AgedMultiplier)
+}
+
+func TestClampMultipliers_Negative(t *testing.T) {
+	setEnvs(t, map[string]string{
+		"CAPACITY_AWARE_FRESH_MULTIPLIER": "-0.5",
+		"CAPACITY_AWARE_AGED_MULTIPLIER":  "-2",
+	})
+
+	cfg := ConfigFromEnv()
+
+	assert.Equal(t, 0.0, cfg.FreshMultiplier)
+	assert.Equal(t, 0.0, cfg.AgedMultiplier)
+}
+
+func TestClampMultipliers_NaN(t *testing.T) {
+	setEnvs(t, map[string]string{
+		"CAPACITY_AWARE_FRESH_MULTIPLIER": "NaN",
+		"CAPACITY_AWARE_AGED_MULTIPLIER":  "NaN",
+	})
+
+	cfg := ConfigFromEnv()
+
+	assert.False(t, math.IsNaN(cfg.FreshMultiplier))
+	assert.Equal(t, 1.0, cfg.FreshMultiplier)
+	assert.Equal(t, 1.0, cfg.AgedMultiplier)
+}
+
+func TestClampMultipliers_PositiveInf(t *testing.T) {
+	setEnvs(t, map[string]string{
+		"CAPACITY_AWARE_FRESH_MULTIPLIER": "+Inf",
+		"CAPACITY_AWARE_AGED_MULTIPLIER":  "+Inf",
+	})
+
+	cfg := ConfigFromEnv()
+
+	assert.Equal(t, 1.0, cfg.FreshMultiplier)
+	assert.Equal(t, 1.0, cfg.AgedMultiplier)
+}
+
+func TestClampMultipliers_Invalid(t *testing.T) {
+	setEnvs(t, map[string]string{
+		"CAPACITY_AWARE_FRESH_MULTIPLIER": "not-a-float",
+		"CAPACITY_AWARE_AGED_MULTIPLIER":  "garbage",
+	})
+
+	cfg := ConfigFromEnv()
+
+	assert.Equal(t, 1.0, cfg.FreshMultiplier)
+	assert.Equal(t, 1.0, cfg.AgedMultiplier)
+}
+
+func TestClampMultipliers_TooLarge(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want float64
+	}{
+		{"scientific", "1e10", 1000},
+		{"fifteen-hundred", "1500", 1000},
+		{"ten-thousand", "10000", 1000},
+		{"at-cap", "1000", 1000},
+		{"below-cap", "999", 999},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			setEnvs(t, map[string]string{
+				"CAPACITY_AWARE_FRESH_MULTIPLIER": tc.in,
+				"CAPACITY_AWARE_AGED_MULTIPLIER":  tc.in,
+			})
+
+			cfg := ConfigFromEnv()
+
+			assert.Equal(t, tc.want, cfg.FreshMultiplier)
+			assert.Equal(t, tc.want, cfg.AgedMultiplier)
+		})
+	}
 }

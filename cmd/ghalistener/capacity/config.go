@@ -3,6 +3,7 @@ package capacity
 import (
 	"errors"
 	"log/slog"
+	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -21,6 +22,10 @@ const (
 	// the proactive baseline during a HUD outage; outer caps (MaxRunners
 	// headroom, MaxBurstCapacity) bound the absolute blast radius.
 	defaultHUDFailureMultiplier = 3
+	// multiplierHardCap bounds FreshMultiplier / AgedMultiplier so a typo
+	// (e.g. 1e10) cannot overflow downstream int conversions in monitor.go
+	// and silently wrap to a negative desired count.
+	multiplierHardCap = 1000
 )
 
 // Config holds all configuration for the capacity monitor.
@@ -94,6 +99,9 @@ type Config struct {
 	// (sharded across clusters) and "aged" jobs (claimed in full by every
 	// cluster). 0 disables sharding entirely.
 	AgeThresholdSeconds int
+
+	FreshMultiplier float64
+	AgedMultiplier  float64
 }
 
 // ConfigFromEnv reads capacity monitor configuration from environment
@@ -125,6 +133,8 @@ func ConfigFromEnv() Config {
 		ClusterIndex:           envInt("CAPACITY_AWARE_CLUSTER_INDEX", 0),
 		ClusterCount:           envInt("CAPACITY_AWARE_CLUSTER_COUNT", 1),
 		AgeThresholdSeconds:    envInt("CAPACITY_AWARE_AGE_THRESHOLD_SECONDS", 0),
+		FreshMultiplier:        envFloat("CAPACITY_AWARE_FRESH_MULTIPLIER", 1.0),
+		AgedMultiplier:         envFloat("CAPACITY_AWARE_AGED_MULTIPLIER", 1.0),
 	}
 
 	if c.ProactiveCapacity < 0 {
@@ -162,6 +172,7 @@ func ConfigFromEnv() Config {
 	}
 
 	clampShardingFields(&c)
+	clampMultiplierFields(&c)
 
 	return c
 }
@@ -193,6 +204,7 @@ func (c *Config) Validate() error {
 	}
 
 	clampShardingFields(c)
+	clampMultiplierFields(c)
 
 	if c.Enabled && c.RunnerNodeFleet == "" {
 		// Hard requirement: the runner-pool fleet drives placeholder-runner
@@ -235,6 +247,18 @@ func envInt(key string, fallback int) int {
 		return fallback
 	}
 	return i
+}
+
+func envFloat(key string, fallback float64) float64 {
+	v, ok := os.LookupEnv(key)
+	if !ok {
+		return fallback
+	}
+	f, err := strconv.ParseFloat(strings.TrimSpace(v), 64)
+	if err != nil {
+		return fallback
+	}
+	return f
 }
 
 func envDuration(key string, fallback time.Duration) time.Duration {
@@ -282,4 +306,28 @@ func clampShardingFields(c *Config) {
 			"original", c.AgeThresholdSeconds, "clampedTo", 60)
 		c.AgeThresholdSeconds = 60
 	}
+}
+
+func clampMultiplierFields(c *Config) {
+	c.FreshMultiplier = sanitizeMultiplier("FreshMultiplier", c.FreshMultiplier)
+	c.AgedMultiplier = sanitizeMultiplier("AgedMultiplier", c.AgedMultiplier)
+}
+
+func sanitizeMultiplier(name string, v float64) float64 {
+	if math.IsNaN(v) || math.IsInf(v, 0) {
+		slog.Warn("multiplier is NaN or Inf, clamping to 1.0",
+			"field", name, "original", v)
+		return 1.0
+	}
+	if v < 0 {
+		slog.Warn("multiplier is negative, clamping to 0",
+			"field", name, "original", v)
+		return 0
+	}
+	if v > multiplierHardCap {
+		slog.Warn("multiplier exceeds hard cap, clamping",
+			"field", name, "original", v, "cap", float64(multiplierHardCap))
+		return multiplierHardCap
+	}
+	return v
 }

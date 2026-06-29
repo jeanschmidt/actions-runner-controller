@@ -35,6 +35,12 @@ func newTestMonitor(t *testing.T, cfg Config, hudRows []QueuedJobsForRunner) (*M
 	if cfg.ScaleSetName == "" {
 		cfg.ScaleSetName = "test-sset"
 	}
+	if cfg.FreshMultiplier == 0 {
+		cfg.FreshMultiplier = 1.0
+	}
+	if cfg.AgedMultiplier == 0 {
+		cfg.AgedMultiplier = 1.0
+	}
 	cs := newFakeClientset()
 
 	var maxRunnersVal atomic.Int32
@@ -1515,6 +1521,12 @@ func newShardingTestMonitor(
 	if cfg.HUDAPIToken == "" {
 		cfg.HUDAPIToken = "test"
 	}
+	if cfg.FreshMultiplier == 0 {
+		cfg.FreshMultiplier = 1.0
+	}
+	if cfg.AgedMultiplier == 0 {
+		cfg.AgedMultiplier = 1.0
+	}
 	cs := newFakeClientset()
 
 	var maxRunnersVal atomic.Int32
@@ -1673,4 +1685,114 @@ func TestReconcile_Sharding_DisabledBySingleCluster(t *testing.T) {
 	// Sharding disabled -> queued = nTotal = 8 -> 16 pods.
 	assert.Equal(t, 16, countPods(t, cs, "test-ns"),
 		"ClusterCount=1 must short-circuit to the single-query (legacy) path")
+}
+
+func TestReconcile_Sharding_FreshMultiplierHalf(t *testing.T) {
+	cfg := Config{
+		ProactiveCapacity:   0,
+		MaxRunners:          100,
+		ScaleSetLabels:      []string{"linux.2xlarge"},
+		PlaceholderTimeout:  5 * time.Minute,
+		ClusterIndex:        0,
+		ClusterCount:        2,
+		AgeThresholdSeconds: 900,
+		FreshMultiplier:     0.5,
+		AgedMultiplier:      1.0,
+	}
+	m, cs, _ := newShardingTestMonitor(t, cfg, "linux.2xlarge", 10, 0)
+	m.reconcileProvisioning(context.Background())
+
+	assert.Equal(t, 6, countPods(t, cs, "test-ns"))
+}
+
+func TestReconcile_Sharding_FreshMultiplierDouble(t *testing.T) {
+	cfg := Config{
+		ProactiveCapacity:   0,
+		MaxRunners:          100,
+		ScaleSetLabels:      []string{"linux.2xlarge"},
+		PlaceholderTimeout:  5 * time.Minute,
+		ClusterIndex:        0,
+		ClusterCount:        2,
+		AgeThresholdSeconds: 900,
+		FreshMultiplier:     2.0,
+		AgedMultiplier:      1.0,
+	}
+	m, cs, _ := newShardingTestMonitor(t, cfg, "linux.2xlarge", 10, 0)
+	m.reconcileProvisioning(context.Background())
+
+	assert.Equal(t, 20, countPods(t, cs, "test-ns"))
+}
+
+func TestReconcile_Sharding_AgedMultiplierHalf(t *testing.T) {
+	cfg := Config{
+		ProactiveCapacity:   0,
+		MaxRunners:          100,
+		ScaleSetLabels:      []string{"linux.2xlarge"},
+		PlaceholderTimeout:  5 * time.Minute,
+		ClusterIndex:        0,
+		ClusterCount:        2,
+		AgeThresholdSeconds: 900,
+		FreshMultiplier:     1.0,
+		AgedMultiplier:      0.5,
+	}
+	m, cs, _ := newShardingTestMonitor(t, cfg, "linux.2xlarge", 10, 8)
+	m.reconcileProvisioning(context.Background())
+
+	assert.Equal(t, 10, countPods(t, cs, "test-ns"))
+}
+
+func TestReconcile_Sharding_AgedMultiplierDouble(t *testing.T) {
+	cfg := Config{
+		ProactiveCapacity:   0,
+		MaxRunners:          100,
+		ScaleSetLabels:      []string{"linux.2xlarge"},
+		PlaceholderTimeout:  5 * time.Minute,
+		ClusterIndex:        0,
+		ClusterCount:        2,
+		AgeThresholdSeconds: 900,
+		FreshMultiplier:     1.0,
+		AgedMultiplier:      2.0,
+	}
+	m, cs, _ := newShardingTestMonitor(t, cfg, "linux.2xlarge", 10, 7)
+	m.reconcileProvisioning(context.Background())
+
+	assert.Equal(t, 32, countPods(t, cs, "test-ns"))
+}
+
+func TestReconcile_Sharding_BothMultipliersZero(t *testing.T) {
+	cfg := Config{
+		ProactiveCapacity:   0,
+		MaxRunners:          100,
+		ScaleSetLabels:      []string{"linux.2xlarge"},
+		PlaceholderTimeout:  5 * time.Minute,
+		ClusterIndex:        0,
+		ClusterCount:        2,
+		AgeThresholdSeconds: 900,
+		FreshMultiplier:     0.0001,
+		AgedMultiplier:      0.0001,
+	}
+	m, cs, _ := newShardingTestMonitor(t, cfg, "linux.2xlarge", 10, 5)
+	m.config.FreshMultiplier = 0
+	m.config.AgedMultiplier = 0
+	m.reconcileProvisioning(context.Background())
+
+	assert.Equal(t, 0, countPods(t, cs, "test-ns"))
+}
+
+func TestReconcile_Unsharded_FreshMultiplier(t *testing.T) {
+	cfg := Config{
+		ProactiveCapacity:   0,
+		MaxRunners:          100,
+		ScaleSetLabels:      []string{"linux.2xlarge"},
+		PlaceholderTimeout:  5 * time.Minute,
+		ClusterIndex:        0,
+		ClusterCount:        1,
+		AgeThresholdSeconds: 0,
+		FreshMultiplier:     0.5,
+		AgedMultiplier:      2.0,
+	}
+	m, cs, _ := newShardingTestMonitor(t, cfg, "linux.2xlarge", 10, 99)
+	m.reconcileProvisioning(context.Background())
+
+	assert.Equal(t, 10, countPods(t, cs, "test-ns"))
 }
