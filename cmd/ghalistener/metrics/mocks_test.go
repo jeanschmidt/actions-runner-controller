@@ -650,6 +650,86 @@ func (_c *MockCapacityRecorder_SetHUDEnabled_Call) RunAndReturn(run func(enabled
 	return _c
 }
 
+// SetHUDFailureBaseCapacity provides a mock function for the type MockCapacityRecorder
+func (_mock *MockCapacityRecorder) SetHUDFailureBaseCapacity(value int) {
+	_mock.Called(value)
+	return
+}
+
+// MockCapacityRecorder_SetHUDFailureBaseCapacity_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetHUDFailureBaseCapacity'
+type MockCapacityRecorder_SetHUDFailureBaseCapacity_Call struct {
+	*mock.Call
+}
+
+// SetHUDFailureBaseCapacity is a helper method to define mock.On call
+//   - value int
+func (_e *MockCapacityRecorder_Expecter) SetHUDFailureBaseCapacity(value interface{}) *MockCapacityRecorder_SetHUDFailureBaseCapacity_Call {
+	return &MockCapacityRecorder_SetHUDFailureBaseCapacity_Call{Call: _e.mock.On("SetHUDFailureBaseCapacity", value)}
+}
+
+func (_c *MockCapacityRecorder_SetHUDFailureBaseCapacity_Call) Run(run func(value int)) *MockCapacityRecorder_SetHUDFailureBaseCapacity_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 int
+		if args[0] != nil {
+			arg0 = args[0].(int)
+		}
+		run(
+			arg0,
+		)
+	})
+	return _c
+}
+
+func (_c *MockCapacityRecorder_SetHUDFailureBaseCapacity_Call) Return() *MockCapacityRecorder_SetHUDFailureBaseCapacity_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockCapacityRecorder_SetHUDFailureBaseCapacity_Call) RunAndReturn(run func(value int)) *MockCapacityRecorder_SetHUDFailureBaseCapacity_Call {
+	_c.Run(run)
+	return _c
+}
+
+// SetMaxBurstCapacity provides a mock function for the type MockCapacityRecorder
+func (_mock *MockCapacityRecorder) SetMaxBurstCapacity(value int) {
+	_mock.Called(value)
+	return
+}
+
+// MockCapacityRecorder_SetMaxBurstCapacity_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetMaxBurstCapacity'
+type MockCapacityRecorder_SetMaxBurstCapacity_Call struct {
+	*mock.Call
+}
+
+// SetMaxBurstCapacity is a helper method to define mock.On call
+//   - value int
+func (_e *MockCapacityRecorder_Expecter) SetMaxBurstCapacity(value interface{}) *MockCapacityRecorder_SetMaxBurstCapacity_Call {
+	return &MockCapacityRecorder_SetMaxBurstCapacity_Call{Call: _e.mock.On("SetMaxBurstCapacity", value)}
+}
+
+func (_c *MockCapacityRecorder_SetMaxBurstCapacity_Call) Run(run func(value int)) *MockCapacityRecorder_SetMaxBurstCapacity_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 int
+		if args[0] != nil {
+			arg0 = args[0].(int)
+		}
+		run(
+			arg0,
+		)
+	})
+	return _c
+}
+
+func (_c *MockCapacityRecorder_SetMaxBurstCapacity_Call) Return() *MockCapacityRecorder_SetMaxBurstCapacity_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockCapacityRecorder_SetMaxBurstCapacity_Call) RunAndReturn(run func(value int)) *MockCapacityRecorder_SetMaxBurstCapacity_Call {
+	_c.Run(run)
+	return _c
+}
+
 // SetPairs provides a mock function for the type MockCapacityRecorder
 func (_mock *MockCapacityRecorder) SetPairs(value int) {
 	_mock.Called(value)
@@ -742,46 +822,6 @@ func (_c *MockCapacityRecorder_SetPlaceholderPods_Call) RunAndReturn(run func(ro
 	return _c
 }
 
-// SetMaxBurstCapacity provides a mock function for the type MockCapacityRecorder
-func (_mock *MockCapacityRecorder) SetMaxBurstCapacity(value int) {
-	_mock.Called(value)
-	return
-}
-
-// MockCapacityRecorder_SetMaxBurstCapacity_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetMaxBurstCapacity'
-type MockCapacityRecorder_SetMaxBurstCapacity_Call struct {
-	*mock.Call
-}
-
-// SetMaxBurstCapacity is a helper method to define mock.On call
-//   - value int
-func (_e *MockCapacityRecorder_Expecter) SetMaxBurstCapacity(value interface{}) *MockCapacityRecorder_SetMaxBurstCapacity_Call {
-	return &MockCapacityRecorder_SetMaxBurstCapacity_Call{Call: _e.mock.On("SetMaxBurstCapacity", value)}
-}
-
-func (_c *MockCapacityRecorder_SetMaxBurstCapacity_Call) Run(run func(value int)) *MockCapacityRecorder_SetMaxBurstCapacity_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 int
-		if args[0] != nil {
-			arg0 = args[0].(int)
-		}
-		run(
-			arg0,
-		)
-	})
-	return _c
-}
-
-func (_c *MockCapacityRecorder_SetMaxBurstCapacity_Call) Return() *MockCapacityRecorder_SetMaxBurstCapacity_Call {
-	_c.Call.Return()
-	return _c
-}
-
-func (_c *MockCapacityRecorder_SetMaxBurstCapacity_Call) RunAndReturn(run func(value int)) *MockCapacityRecorder_SetMaxBurstCapacity_Call {
-	_c.Run(run)
-	return _c
-}
-
 // SetProactiveCapacity provides a mock function for the type MockCapacityRecorder
 func (_mock *MockCapacityRecorder) SetProactiveCapacity(value int) {
 	_mock.Called(value)
@@ -818,46 +858,6 @@ func (_c *MockCapacityRecorder_SetProactiveCapacity_Call) Return() *MockCapacity
 }
 
 func (_c *MockCapacityRecorder_SetProactiveCapacity_Call) RunAndReturn(run func(value int)) *MockCapacityRecorder_SetProactiveCapacity_Call {
-	_c.Run(run)
-	return _c
-}
-
-// SetHUDFailureBaseCapacity provides a mock function for the type MockCapacityRecorder
-func (_mock *MockCapacityRecorder) SetHUDFailureBaseCapacity(value int) {
-	_mock.Called(value)
-	return
-}
-
-// MockCapacityRecorder_SetHUDFailureBaseCapacity_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetHUDFailureBaseCapacity'
-type MockCapacityRecorder_SetHUDFailureBaseCapacity_Call struct {
-	*mock.Call
-}
-
-// SetHUDFailureBaseCapacity is a helper method to define mock.On call
-//   - value int
-func (_e *MockCapacityRecorder_Expecter) SetHUDFailureBaseCapacity(value interface{}) *MockCapacityRecorder_SetHUDFailureBaseCapacity_Call {
-	return &MockCapacityRecorder_SetHUDFailureBaseCapacity_Call{Call: _e.mock.On("SetHUDFailureBaseCapacity", value)}
-}
-
-func (_c *MockCapacityRecorder_SetHUDFailureBaseCapacity_Call) Run(run func(value int)) *MockCapacityRecorder_SetHUDFailureBaseCapacity_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 int
-		if args[0] != nil {
-			arg0 = args[0].(int)
-		}
-		run(
-			arg0,
-		)
-	})
-	return _c
-}
-
-func (_c *MockCapacityRecorder_SetHUDFailureBaseCapacity_Call) Return() *MockCapacityRecorder_SetHUDFailureBaseCapacity_Call {
-	_c.Call.Return()
-	return _c
-}
-
-func (_c *MockCapacityRecorder_SetHUDFailureBaseCapacity_Call) RunAndReturn(run func(value int)) *MockCapacityRecorder_SetHUDFailureBaseCapacity_Call {
 	_c.Run(run)
 	return _c
 }
@@ -1650,6 +1650,86 @@ func (_c *MockServerExporter_SetHUDEnabled_Call) RunAndReturn(run func(enabled b
 	return _c
 }
 
+// SetHUDFailureBaseCapacity provides a mock function for the type MockServerExporter
+func (_mock *MockServerExporter) SetHUDFailureBaseCapacity(value int) {
+	_mock.Called(value)
+	return
+}
+
+// MockServerExporter_SetHUDFailureBaseCapacity_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetHUDFailureBaseCapacity'
+type MockServerExporter_SetHUDFailureBaseCapacity_Call struct {
+	*mock.Call
+}
+
+// SetHUDFailureBaseCapacity is a helper method to define mock.On call
+//   - value int
+func (_e *MockServerExporter_Expecter) SetHUDFailureBaseCapacity(value interface{}) *MockServerExporter_SetHUDFailureBaseCapacity_Call {
+	return &MockServerExporter_SetHUDFailureBaseCapacity_Call{Call: _e.mock.On("SetHUDFailureBaseCapacity", value)}
+}
+
+func (_c *MockServerExporter_SetHUDFailureBaseCapacity_Call) Run(run func(value int)) *MockServerExporter_SetHUDFailureBaseCapacity_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 int
+		if args[0] != nil {
+			arg0 = args[0].(int)
+		}
+		run(
+			arg0,
+		)
+	})
+	return _c
+}
+
+func (_c *MockServerExporter_SetHUDFailureBaseCapacity_Call) Return() *MockServerExporter_SetHUDFailureBaseCapacity_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockServerExporter_SetHUDFailureBaseCapacity_Call) RunAndReturn(run func(value int)) *MockServerExporter_SetHUDFailureBaseCapacity_Call {
+	_c.Run(run)
+	return _c
+}
+
+// SetMaxBurstCapacity provides a mock function for the type MockServerExporter
+func (_mock *MockServerExporter) SetMaxBurstCapacity(value int) {
+	_mock.Called(value)
+	return
+}
+
+// MockServerExporter_SetMaxBurstCapacity_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetMaxBurstCapacity'
+type MockServerExporter_SetMaxBurstCapacity_Call struct {
+	*mock.Call
+}
+
+// SetMaxBurstCapacity is a helper method to define mock.On call
+//   - value int
+func (_e *MockServerExporter_Expecter) SetMaxBurstCapacity(value interface{}) *MockServerExporter_SetMaxBurstCapacity_Call {
+	return &MockServerExporter_SetMaxBurstCapacity_Call{Call: _e.mock.On("SetMaxBurstCapacity", value)}
+}
+
+func (_c *MockServerExporter_SetMaxBurstCapacity_Call) Run(run func(value int)) *MockServerExporter_SetMaxBurstCapacity_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 int
+		if args[0] != nil {
+			arg0 = args[0].(int)
+		}
+		run(
+			arg0,
+		)
+	})
+	return _c
+}
+
+func (_c *MockServerExporter_SetMaxBurstCapacity_Call) Return() *MockServerExporter_SetMaxBurstCapacity_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockServerExporter_SetMaxBurstCapacity_Call) RunAndReturn(run func(value int)) *MockServerExporter_SetMaxBurstCapacity_Call {
+	_c.Run(run)
+	return _c
+}
+
 // SetPairs provides a mock function for the type MockServerExporter
 func (_mock *MockServerExporter) SetPairs(value int) {
 	_mock.Called(value)
@@ -1742,46 +1822,6 @@ func (_c *MockServerExporter_SetPlaceholderPods_Call) RunAndReturn(run func(role
 	return _c
 }
 
-// SetMaxBurstCapacity provides a mock function for the type MockServerExporter
-func (_mock *MockServerExporter) SetMaxBurstCapacity(value int) {
-	_mock.Called(value)
-	return
-}
-
-// MockServerExporter_SetMaxBurstCapacity_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetMaxBurstCapacity'
-type MockServerExporter_SetMaxBurstCapacity_Call struct {
-	*mock.Call
-}
-
-// SetMaxBurstCapacity is a helper method to define mock.On call
-//   - value int
-func (_e *MockServerExporter_Expecter) SetMaxBurstCapacity(value interface{}) *MockServerExporter_SetMaxBurstCapacity_Call {
-	return &MockServerExporter_SetMaxBurstCapacity_Call{Call: _e.mock.On("SetMaxBurstCapacity", value)}
-}
-
-func (_c *MockServerExporter_SetMaxBurstCapacity_Call) Run(run func(value int)) *MockServerExporter_SetMaxBurstCapacity_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 int
-		if args[0] != nil {
-			arg0 = args[0].(int)
-		}
-		run(
-			arg0,
-		)
-	})
-	return _c
-}
-
-func (_c *MockServerExporter_SetMaxBurstCapacity_Call) Return() *MockServerExporter_SetMaxBurstCapacity_Call {
-	_c.Call.Return()
-	return _c
-}
-
-func (_c *MockServerExporter_SetMaxBurstCapacity_Call) RunAndReturn(run func(value int)) *MockServerExporter_SetMaxBurstCapacity_Call {
-	_c.Run(run)
-	return _c
-}
-
 // SetProactiveCapacity provides a mock function for the type MockServerExporter
 func (_mock *MockServerExporter) SetProactiveCapacity(value int) {
 	_mock.Called(value)
@@ -1818,46 +1858,6 @@ func (_c *MockServerExporter_SetProactiveCapacity_Call) Return() *MockServerExpo
 }
 
 func (_c *MockServerExporter_SetProactiveCapacity_Call) RunAndReturn(run func(value int)) *MockServerExporter_SetProactiveCapacity_Call {
-	_c.Run(run)
-	return _c
-}
-
-// SetHUDFailureBaseCapacity provides a mock function for the type MockServerExporter
-func (_mock *MockServerExporter) SetHUDFailureBaseCapacity(value int) {
-	_mock.Called(value)
-	return
-}
-
-// MockServerExporter_SetHUDFailureBaseCapacity_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetHUDFailureBaseCapacity'
-type MockServerExporter_SetHUDFailureBaseCapacity_Call struct {
-	*mock.Call
-}
-
-// SetHUDFailureBaseCapacity is a helper method to define mock.On call
-//   - value int
-func (_e *MockServerExporter_Expecter) SetHUDFailureBaseCapacity(value interface{}) *MockServerExporter_SetHUDFailureBaseCapacity_Call {
-	return &MockServerExporter_SetHUDFailureBaseCapacity_Call{Call: _e.mock.On("SetHUDFailureBaseCapacity", value)}
-}
-
-func (_c *MockServerExporter_SetHUDFailureBaseCapacity_Call) Run(run func(value int)) *MockServerExporter_SetHUDFailureBaseCapacity_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 int
-		if args[0] != nil {
-			arg0 = args[0].(int)
-		}
-		run(
-			arg0,
-		)
-	})
-	return _c
-}
-
-func (_c *MockServerExporter_SetHUDFailureBaseCapacity_Call) Return() *MockServerExporter_SetHUDFailureBaseCapacity_Call {
-	_c.Call.Return()
-	return _c
-}
-
-func (_c *MockServerExporter_SetHUDFailureBaseCapacity_Call) RunAndReturn(run func(value int)) *MockServerExporter_SetHUDFailureBaseCapacity_Call {
 	_c.Run(run)
 	return _c
 }

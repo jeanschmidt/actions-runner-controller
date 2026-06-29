@@ -200,7 +200,7 @@ func TestBuildURL_OverwritesPreexistingParametersQuery(t *testing.T) {
 		"?parameters=%7B%22maxAgeDays%22%3A99%2C%22orgs%22%3A%5B%22stale%22%5D%7D"
 	client := NewHUDClient(legacyURL, "tok")
 
-	built, err := client.buildURL([]string{"label-1"})
+	built, err := client.buildURL([]string{"label-1"}, 0)
 	require.NoError(t, err)
 
 	u, err := neturl.Parse(built)
@@ -227,7 +227,7 @@ func TestBuildURL_PreservesOtherQueryParameters(t *testing.T) {
 		"?foo=bar&parameters=%7B%22maxAgeDays%22%3A99%7D&baz=qux"
 	client := NewHUDClient(seedURL, "tok")
 
-	built, err := client.buildURL([]string{"label-1"})
+	built, err := client.buildURL([]string{"label-1"}, 0)
 	require.NoError(t, err)
 
 	u, err := neturl.Parse(built)
@@ -245,7 +245,7 @@ func TestBuildURL_EmptyRunnerLabelsSerialisesAsEmptyArray(t *testing.T) {
 	client := NewHUDClient("https://hud.example/api", "tok")
 
 	for _, labels := range [][]string{nil, {}} {
-		built, err := client.buildURL(labels)
+		built, err := client.buildURL(labels, 0)
 		require.NoError(t, err)
 		u, err := neturl.Parse(built)
 		require.NoError(t, err)
@@ -268,4 +268,62 @@ func TestDefaultHUDRequestParams(t *testing.T) {
 	assert.Equal(t, []string{"pytorch"}, p.Orgs)
 	assert.Equal(t, "", p.Repo)
 	assert.Nil(t, p.RunnerLabels, "RunnerLabels is filled in per-request")
+}
+
+// GetQueuedJobsForLabelsWithThreshold sends the supplied thresholdMinutes
+// as queuedThresholdMinutes — this is the wire-level contract that the
+// cluster-aware sharding logic in the monitor depends on.
+func TestGetQueuedJobsForLabelsWithThreshold_SendsThresholdParameter(t *testing.T) {
+	var got struct {
+		QueuedThresholdMinutes int      `json:"queuedThresholdMinutes"`
+		RunnerLabels           []string `json:"runnerLabels"`
+	}
+	client, cleanup := newTestHUDClient(t, func(w http.ResponseWriter, r *http.Request) {
+		paramsRaw := r.URL.Query().Get("parameters")
+		require.NotEmpty(t, paramsRaw, "request must carry a parameters query")
+		require.NoError(t, json.Unmarshal([]byte(paramsRaw), &got))
+		w.WriteHeader(http.StatusOK)
+		require.NoError(t, json.NewEncoder(w).Encode([]QueuedJobsForRunner{}))
+	})
+	defer cleanup()
+
+	_, err := client.GetQueuedJobsForLabelsWithThreshold(
+		context.Background(),
+		[]string{"l-x86iavx512-32-256"},
+		15,
+	)
+	require.NoError(t, err)
+
+	assert.Equal(t, 15, got.QueuedThresholdMinutes,
+		"queuedThresholdMinutes must be the value passed to the threshold-aware call")
+	assert.Equal(t, []string{"l-x86iavx512-32-256"}, got.RunnerLabels)
+}
+
+func TestGetQueuedJobsForLabels_StillSendsThresholdZero(t *testing.T) {
+	var got struct {
+		QueuedThresholdMinutes int `json:"queuedThresholdMinutes"`
+	}
+	client, cleanup := newTestHUDClient(t, func(w http.ResponseWriter, r *http.Request) {
+		paramsRaw := r.URL.Query().Get("parameters")
+		require.NotEmpty(t, paramsRaw)
+		require.NoError(t, json.Unmarshal([]byte(paramsRaw), &got))
+		w.WriteHeader(http.StatusOK)
+		require.NoError(t, json.NewEncoder(w).Encode([]QueuedJobsForRunner{}))
+	})
+	defer cleanup()
+
+	_, err := client.GetQueuedJobsForLabels(context.Background(), []string{"any-label"})
+	require.NoError(t, err)
+
+	assert.Equal(t, 0, got.QueuedThresholdMinutes,
+		"GetQueuedJobsForLabels must continue sending threshold=0 (any-duration)")
+}
+
+// Empty labels short-circuit before any HTTP traffic in the threshold-aware
+// variant too — same behavior as the legacy wrapper.
+func TestGetQueuedJobsForLabelsWithThreshold_EmptyLabelsShortCircuits(t *testing.T) {
+	client := NewHUDClient(defaultHUDAPIURL, "tok")
+	total, err := client.GetQueuedJobsForLabelsWithThreshold(context.Background(), []string{}, 15)
+	require.NoError(t, err)
+	assert.Equal(t, 0, total)
 }

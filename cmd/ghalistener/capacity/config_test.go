@@ -1,6 +1,7 @@
 package capacity
 
 import (
+	"math"
 	"os"
 	"testing"
 	"time"
@@ -388,4 +389,224 @@ func TestConfigFromEnv_RunnerNodeFleet_WhitespaceTrimmed(t *testing.T) {
 	cfg := ConfigFromEnv()
 
 	assert.Equal(t, "c7i-runner", cfg.RunnerNodeFleet)
+}
+
+// The three sharding env vars must round-trip into ConfigFromEnv with sane
+// values intact (no clamping when the values are already in-range).
+func TestConfigFromEnv_Sharding_AllSet(t *testing.T) {
+	setEnvs(t, map[string]string{
+		"CAPACITY_AWARE_CLUSTER_INDEX":         "1",
+		"CAPACITY_AWARE_CLUSTER_COUNT":         "3",
+		"CAPACITY_AWARE_AGE_THRESHOLD_SECONDS": "900",
+	})
+
+	cfg := ConfigFromEnv()
+
+	assert.Equal(t, 1, cfg.ClusterIndex)
+	assert.Equal(t, 3, cfg.ClusterCount)
+	assert.Equal(t, 900, cfg.AgeThresholdSeconds)
+}
+
+// Defaults disable sharding: ClusterCount=1 and AgeThresholdSeconds=0
+// together short-circuit the two-call HUD path.
+func TestConfigFromEnv_Sharding_Defaults(t *testing.T) {
+	unsetEnvs(t, []string{
+		"CAPACITY_AWARE_CLUSTER_INDEX",
+		"CAPACITY_AWARE_CLUSTER_COUNT",
+		"CAPACITY_AWARE_AGE_THRESHOLD_SECONDS",
+	})
+
+	cfg := ConfigFromEnv()
+
+	assert.Equal(t, 0, cfg.ClusterIndex, "default ClusterIndex")
+	assert.Equal(t, 1, cfg.ClusterCount, "default ClusterCount disables sharding")
+	assert.Equal(t, 0, cfg.AgeThresholdSeconds, "default AgeThresholdSeconds disables sharding")
+}
+
+// ClusterCount < 1 must clamp to 1 — downstream integer division would
+// panic on zero and would slice nonsensically on negatives.
+func TestConfigFromEnv_ClusterCount_BelowOneClampedToOne(t *testing.T) {
+	t.Run("zero", func(t *testing.T) {
+		setEnvs(t, map[string]string{"CAPACITY_AWARE_CLUSTER_COUNT": "0"})
+		cfg := ConfigFromEnv()
+		assert.Equal(t, 1, cfg.ClusterCount)
+	})
+	t.Run("negative", func(t *testing.T) {
+		setEnvs(t, map[string]string{"CAPACITY_AWARE_CLUSTER_COUNT": "-3"})
+		cfg := ConfigFromEnv()
+		assert.Equal(t, 1, cfg.ClusterCount)
+	})
+}
+
+// Negative ClusterIndex must clamp to 0 — it is used as an unsigned offset
+// into the per-cluster slice arithmetic.
+func TestConfigFromEnv_ClusterIndex_NegativeClampedToZero(t *testing.T) {
+	setEnvs(t, map[string]string{"CAPACITY_AWARE_CLUSTER_INDEX": "-2"})
+	cfg := ConfigFromEnv()
+	assert.Equal(t, 0, cfg.ClusterIndex)
+}
+
+// ClusterIndex must always be < ClusterCount, otherwise the slice math
+// would assign capacity to a non-existent cluster slot. Clamp to last.
+func TestConfigFromEnv_ClusterIndex_GreaterEqualClusterCountClamped(t *testing.T) {
+	setEnvs(t, map[string]string{
+		"CAPACITY_AWARE_CLUSTER_INDEX": "5",
+		"CAPACITY_AWARE_CLUSTER_COUNT": "3",
+	})
+	cfg := ConfigFromEnv()
+	assert.Equal(t, 3, cfg.ClusterCount)
+	assert.Equal(t, 2, cfg.ClusterIndex, "ClusterIndex must clamp to ClusterCount-1")
+}
+
+// Negative AgeThresholdSeconds must clamp to 0 — used as a divisor and
+// fed straight to HUD as a non-negative integer.
+func TestConfigFromEnv_AgeThresholdSeconds_NegativeClampedToZero(t *testing.T) {
+	setEnvs(t, map[string]string{"CAPACITY_AWARE_AGE_THRESHOLD_SECONDS": "-60"})
+	cfg := ConfigFromEnv()
+	assert.Equal(t, 0, cfg.AgeThresholdSeconds)
+}
+
+// HUD threshold parameter is minute-granular; any positive sub-60-second
+// value rounds down to 0 minutes and would make every cluster claim 100%
+// of the queue as aged (the inverse of sharding). Clamp such values up
+// to 60. Zero stays zero — it is the explicit "sharding disabled" signal.
+func TestClampShardingFields_AgeThresholdSubMinuteClampsToSixty(t *testing.T) {
+	cases := []struct {
+		name string
+		in   int
+		want int
+	}{
+		{"one", 1, 60},
+		{"thirty", 30, 60},
+		{"fifty-nine", 59, 60},
+		{"zero-stays-zero", 0, 0},
+		{"sixty-unchanged", 60, 60},
+		{"nine-hundred-unchanged", 900, 900},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := Config{AgeThresholdSeconds: tc.in}
+			clampShardingFields(&cfg)
+			assert.Equal(t, tc.want, cfg.AgeThresholdSeconds)
+		})
+	}
+}
+
+// Validate() must apply the same sharding clamps for callers that
+// construct Config programmatically (bypassing ConfigFromEnv).
+func TestConfig_Validate_ShardingClamps(t *testing.T) {
+	cfg := Config{
+		ClusterCount:        0,
+		ClusterIndex:        -7,
+		AgeThresholdSeconds: -1,
+	}
+	require.NoError(t, cfg.Validate())
+	assert.Equal(t, 1, cfg.ClusterCount)
+	assert.Equal(t, 0, cfg.ClusterIndex)
+	assert.Equal(t, 0, cfg.AgeThresholdSeconds)
+
+	cfg = Config{ClusterCount: 2, ClusterIndex: 5}
+	require.NoError(t, cfg.Validate())
+	assert.Equal(t, 2, cfg.ClusterCount)
+	assert.Equal(t, 1, cfg.ClusterIndex, "Validate must clamp ClusterIndex to ClusterCount-1")
+}
+
+func TestConfigFromEnv_Multipliers_AllSet(t *testing.T) {
+	setEnvs(t, map[string]string{
+		"CAPACITY_AWARE_FRESH_MULTIPLIER": "0.5",
+		"CAPACITY_AWARE_AGED_MULTIPLIER":  "1.5",
+	})
+
+	cfg := ConfigFromEnv()
+
+	assert.Equal(t, 0.5, cfg.FreshMultiplier)
+	assert.Equal(t, 1.5, cfg.AgedMultiplier)
+}
+
+func TestConfigFromEnv_Multipliers_Defaults(t *testing.T) {
+	unsetEnvs(t, []string{
+		"CAPACITY_AWARE_FRESH_MULTIPLIER",
+		"CAPACITY_AWARE_AGED_MULTIPLIER",
+	})
+
+	cfg := ConfigFromEnv()
+
+	assert.Equal(t, 1.0, cfg.FreshMultiplier)
+	assert.Equal(t, 1.0, cfg.AgedMultiplier)
+}
+
+func TestClampMultipliers_Negative(t *testing.T) {
+	setEnvs(t, map[string]string{
+		"CAPACITY_AWARE_FRESH_MULTIPLIER": "-0.5",
+		"CAPACITY_AWARE_AGED_MULTIPLIER":  "-2",
+	})
+
+	cfg := ConfigFromEnv()
+
+	assert.Equal(t, 0.0, cfg.FreshMultiplier)
+	assert.Equal(t, 0.0, cfg.AgedMultiplier)
+}
+
+func TestClampMultipliers_NaN(t *testing.T) {
+	setEnvs(t, map[string]string{
+		"CAPACITY_AWARE_FRESH_MULTIPLIER": "NaN",
+		"CAPACITY_AWARE_AGED_MULTIPLIER":  "NaN",
+	})
+
+	cfg := ConfigFromEnv()
+
+	assert.False(t, math.IsNaN(cfg.FreshMultiplier))
+	assert.Equal(t, 1.0, cfg.FreshMultiplier)
+	assert.Equal(t, 1.0, cfg.AgedMultiplier)
+}
+
+func TestClampMultipliers_PositiveInf(t *testing.T) {
+	setEnvs(t, map[string]string{
+		"CAPACITY_AWARE_FRESH_MULTIPLIER": "+Inf",
+		"CAPACITY_AWARE_AGED_MULTIPLIER":  "+Inf",
+	})
+
+	cfg := ConfigFromEnv()
+
+	assert.Equal(t, 1.0, cfg.FreshMultiplier)
+	assert.Equal(t, 1.0, cfg.AgedMultiplier)
+}
+
+func TestClampMultipliers_Invalid(t *testing.T) {
+	setEnvs(t, map[string]string{
+		"CAPACITY_AWARE_FRESH_MULTIPLIER": "not-a-float",
+		"CAPACITY_AWARE_AGED_MULTIPLIER":  "garbage",
+	})
+
+	cfg := ConfigFromEnv()
+
+	assert.Equal(t, 1.0, cfg.FreshMultiplier)
+	assert.Equal(t, 1.0, cfg.AgedMultiplier)
+}
+
+func TestClampMultipliers_TooLarge(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want float64
+	}{
+		{"scientific", "1e10", 1000},
+		{"fifteen-hundred", "1500", 1000},
+		{"ten-thousand", "10000", 1000},
+		{"at-cap", "1000", 1000},
+		{"below-cap", "999", 999},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			setEnvs(t, map[string]string{
+				"CAPACITY_AWARE_FRESH_MULTIPLIER": tc.in,
+				"CAPACITY_AWARE_AGED_MULTIPLIER":  tc.in,
+			})
+
+			cfg := ConfigFromEnv()
+
+			assert.Equal(t, tc.want, cfg.FreshMultiplier)
+			assert.Equal(t, tc.want, cfg.AgedMultiplier)
+		})
+	}
 }
