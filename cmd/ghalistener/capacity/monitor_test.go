@@ -536,14 +536,15 @@ func TestReconcile_IdempotentWhenAtDesired(t *testing.T) {
 		"second reconcile preserves capacity 0")
 }
 
-// MaxRunners == 0 means "unlimited" (not "zero capacity"). The monitor
-// must create placeholders normally and report capacity = running
-// runners + running pairs without capping at 0.
-// Regression test for the MaxRunners==0 deadlock bug.
-func TestReconcile_MaxRunnersZero_IsUnlimited(t *testing.T) {
+// MaxRunners == 0 is a hard zero cap (operator drain), NOT "unlimited".
+// The controller substitutes the unlimitedMaxRunners sentinel for an unset
+// Spec.MaxRunners, so a literal 0 reaching the monitor is an explicit drain:
+// create no placeholders and advertise 0 capacity to GitHub even while real
+// runners are still running.
+func TestReconcile_MaxRunnersZero_IsHardCap(t *testing.T) {
 	cfg := Config{
 		ProactiveCapacity:  3,
-		MaxRunners:         0, // unlimited
+		MaxRunners:         0, // hard drain
 		PlaceholderTimeout: 5 * time.Minute,
 	}
 	m, cs, maxVal := newTestMonitor(t, cfg, nil)
@@ -552,10 +553,46 @@ func TestReconcile_MaxRunnersZero_IsUnlimited(t *testing.T) {
 	m.reconcileProvisioning(ctx)
 	m.reconcileReporting(ctx)
 
-	// 3 pairs = 6 pods (NOT capped at 0).
+	// Drained: headroom = 0 - 0 = 0, so no placeholders are created.
+	assert.Equal(t, 0, countPods(t, cs, "test-ns"),
+		"MaxRunners=0 must create 0 placeholders (hard drain)")
+	// No capacity advertised.
+	assert.Equal(t, int32(0), maxVal.Load())
+
+	// Add real running runner pods: advertised capacity must still clamp to 0.
+	createRealRunnerPods(t, cs, "test-ns", "test-sset", 7, corev1.PodRunning, "runner")
+
+	m.reconcileProvisioning(ctx)
+	m.reconcileReporting(ctx)
+
+	// capacity = min(runningRunners(7) + runningPairs(0), MaxRunners(0)) = 0.
+	assert.Equal(t, int32(0), maxVal.Load(),
+		"MaxRunners=0 must clamp reported capacity to 0 even with running runners")
+	// Still no placeholder pairs (drained).
+	pairs, _ := m.placeholders.ListPairs(ctx)
+	assert.Empty(t, pairs, "MaxRunners=0 must keep the placeholder pool drained")
+}
+
+// MaxRunners == unlimitedMaxRunners is the "unlimited" sentinel the controller
+// sets for an unset Spec.MaxRunners. All three MaxRunners clamps must be
+// no-ops: placeholders are created per ProactiveCapacity+queued and the
+// advertised capacity tracks running runners + running pairs uncapped.
+func TestReconcile_MaxRunnersUnset_IsUnlimited(t *testing.T) {
+	cfg := Config{
+		ProactiveCapacity:  3,
+		MaxRunners:         unlimitedMaxRunners, // unlimited sentinel
+		PlaceholderTimeout: 5 * time.Minute,
+	}
+	m, cs, maxVal := newTestMonitor(t, cfg, nil)
+	ctx := context.Background()
+
+	m.reconcileProvisioning(ctx)
+	m.reconcileReporting(ctx)
+
+	// 3 pairs = 6 pods (unlimited -> no headroom clamp).
 	assert.Equal(t, 6, countPods(t, cs, "test-ns"),
-		"MaxRunners=0 must NOT cap placeholders at 0")
-	// No running pairs yet -> capacity = 0 (not because of cap).
+		"unlimited sentinel must NOT cap placeholders")
+	// No running pairs yet -> capacity = 0 (not because of a cap).
 	assert.Equal(t, int32(0), maxVal.Load())
 
 	// Make all pairs Running and add some real runner pods.
@@ -563,32 +600,15 @@ func TestReconcile_MaxRunnersZero_IsUnlimited(t *testing.T) {
 	for slotID := range pairs {
 		setPodsPhase(t, cs, ctx, "test-ns", slotID, corev1.PodRunning)
 	}
-	for i := 0; i < 7; i++ {
-		pod := &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "runner-" + string(rune('a'+i)),
-				Namespace: "test-ns",
-				Labels: map[string]string{
-					"actions-ephemeral-runner": "True",
-					labelScaleSet:              "test-sset",
-				},
-			},
-			Spec: corev1.PodSpec{
-				Containers: []corev1.Container{{Name: "r", Image: "x"}},
-			},
-			Status: corev1.PodStatus{Phase: corev1.PodRunning},
-		}
-		_, err := cs.CoreV1().Pods("test-ns").Create(ctx, pod, metav1.CreateOptions{})
-		require.NoError(t, err)
-	}
+	createRealRunnerPods(t, cs, "test-ns", "test-sset", 7, corev1.PodRunning, "runner")
 
 	m.reconcileProvisioning(ctx)
 	m.reconcileReporting(ctx)
 
-	// capacity = runningRunners(7) + runningPairs(3) = 10, NOT capped.
+	// capacity = runningRunners(7) + runningPairs(3) = 10, uncapped.
 	assert.Equal(t, int32(10), maxVal.Load(),
-		"MaxRunners=0 must NOT cap reported capacity")
-	// Still 3 pairs (proactive=3, no queued, no MaxRunners cap).
+		"unlimited sentinel must NOT cap reported capacity")
+	// Still 3 pairs (proactive=3, no queued, no cap).
 	pairs, _ = m.placeholders.ListPairs(ctx)
 	assert.Len(t, pairs, 3)
 }
@@ -1207,8 +1227,8 @@ func TestReconcile_MaxBurstCapacity_ZeroIsNoCap(t *testing.T) {
 	}
 	cfg := Config{
 		ProactiveCapacity:  3,
-		MaxRunners:         0, // unlimited so headroom can't interfere
-		MaxBurstCapacity:   0, // unlimited
+		MaxRunners:         unlimitedMaxRunners, // unlimited so headroom can't interfere
+		MaxBurstCapacity:   0,                   // unlimited
 		ScaleSetLabels:     []string{"linux.2xlarge"},
 		PlaceholderTimeout: 5 * time.Minute,
 	}
@@ -1228,7 +1248,7 @@ func TestReconcile_MaxBurstCapacity_ClampsWhenExceeded(t *testing.T) {
 	}
 	cfg := Config{
 		ProactiveCapacity:  5,
-		MaxRunners:         0, // unlimited so MaxBurstCapacity is the only cap
+		MaxRunners:         unlimitedMaxRunners, // unlimited so MaxBurstCapacity is the only cap
 		MaxBurstCapacity:   7,
 		ScaleSetLabels:     []string{"linux.2xlarge"},
 		PlaceholderTimeout: 5 * time.Minute,
@@ -1249,7 +1269,7 @@ func TestReconcile_MaxBurstCapacity_UnclampedWhenBelow(t *testing.T) {
 	}
 	cfg := Config{
 		ProactiveCapacity:  3,
-		MaxRunners:         0,
+		MaxRunners:         unlimitedMaxRunners, // unlimited so MaxBurstCapacity is the only cap
 		MaxBurstCapacity:   20,
 		ScaleSetLabels:     []string{"linux.2xlarge"},
 		PlaceholderTimeout: 5 * time.Minute,

@@ -22,6 +22,12 @@ const (
 	provisionerMaxRetries = 3 // 1s + 2s + 4s = 7s, within 30s provisioner interval
 )
 
+// unlimitedMaxRunners is the "unlimited" sentinel the controller substitutes
+// when AutoscalingRunnerSet.Spec.MaxRunners is unset (resourcebuilder maps nil
+// -> math.MaxInt32). Any value below it — including 0 — is a real cap the
+// capacity monitor enforces.
+const unlimitedMaxRunners = math.MaxInt32
+
 // Phase / reason / result label values for capacity recorder calls.
 // Centralised here (and not in metrics.go) so the call sites in this
 // package read as plain Go identifiers instead of bare strings — and
@@ -493,7 +499,9 @@ func (m *Monitor) reconcileProvisioning(ctx context.Context) {
 	// when real runners exist.
 	runningRunnerPods := 0
 	pendingRunnerPods := 0
-	if m.config.MaxRunners > 0 {
+	// Below the sentinel we count real runner pods so the headroom clamp can
+	// bound placeholders against the remaining cap.
+	if m.config.MaxRunners < unlimitedMaxRunners {
 		counts, err := m.countRunnersByPhaseWithRetry(ctx, provisionerMaxRetries)
 		if err != nil {
 			m.logger.Error("failed to count runner pods after retries, skipping provisioning cycle", "error", err)
@@ -517,7 +525,7 @@ func (m *Monitor) reconcileProvisioning(ctx context.Context) {
 	// pending) consume the cap, so the placeholder pool can only fill what's left.
 	// Without this, MaxRunners=N could allow up to N placeholders on top of N real
 	// runners, doubling the intended cap.
-	if m.config.MaxRunners > 0 {
+	if m.config.MaxRunners < unlimitedMaxRunners {
 		totalRunnerPods := runningRunnerPods + pendingRunnerPods
 		headroom := max(0, m.config.MaxRunners-totalRunnerPods)
 		desiredPairs = min(desiredPairs, headroom)
@@ -600,7 +608,7 @@ func (m *Monitor) reconcileReporting(ctx context.Context) {
 
 	// 3. Report capacity to GitHub.
 	capacity := runningRunners + runningPairs
-	if m.config.MaxRunners > 0 {
+	if m.config.MaxRunners < unlimitedMaxRunners {
 		capacity = min(capacity, m.config.MaxRunners)
 	}
 	// Set the gauge BEFORE invoking setMaxRunners — so the metric reflects

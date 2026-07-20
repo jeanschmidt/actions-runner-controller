@@ -326,7 +326,7 @@ func TestConfig_Validate_MaxRunnersZeroPreserved(t *testing.T) {
 	cfg := Config{MaxRunners: 0}
 	require.NoError(t, cfg.Validate())
 	assert.Equal(t, 0, cfg.MaxRunners,
-		"Validate preserves MaxRunners=0 (means unlimited downstream)")
+		"Validate preserves MaxRunners=0 (a hard zero cap downstream)")
 }
 
 func TestConfig_Validate_MaxRunnersPositivePreserved(t *testing.T) {
