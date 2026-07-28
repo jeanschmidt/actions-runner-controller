@@ -91,6 +91,14 @@ listenerMetrics:
       labels: ["name", "namespace", "repository", "organization", "enterprise"]
     gha_capacity_reconcile_last_success_timestamp_seconds:
       labels: ["name", "namespace", "repository", "organization", "enterprise", "phase"]
+    gha_capacity_scheduled_runner_side:
+      labels: ["name", "namespace", "repository", "organization", "enterprise"]
+    gha_capacity_scheduled_workflow_side:
+      labels: ["name", "namespace", "repository", "organization", "enterprise"]
+    gha_capacity_starved_runners:
+      labels: ["name", "namespace", "repository", "organization", "enterprise"]
+    gha_capacity_unschedulable_placeholders:
+      labels: ["name", "namespace", "repository", "organization", "enterprise"]
   histograms:
     gha_job_startup_duration_seconds:
       labels:

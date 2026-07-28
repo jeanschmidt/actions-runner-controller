@@ -44,11 +44,11 @@ const (
 	deleteReasonExcess  = "excess"
 	deleteReasonBroken  = "broken"
 
-	skipReasonProvisionerListPairs   = "provisioner_list_pairs"
-	skipReasonProvisionerListRunners = "provisioner_list_runners"
-	skipReasonReporterListPairs      = "reporter_list_pairs"
-	skipReasonReporterCountRunners   = "reporter_count_runners"
-	skipReasonHUDAPIFailed           = "hud_api_failed"
+	skipReasonProvisionerListPairs      = "provisioner_list_pairs"
+	skipReasonProvisionerListRunners    = "provisioner_list_runners"
+	skipReasonReporterListPods          = "reporter_list_pods"
+	skipReasonReporterNodeCacheUnsynced = "reporter_node_cache_unsynced"
+	skipReasonHUDAPIFailed              = "hud_api_failed"
 
 	rolePlaceholderRunnerLabel   = "runner"
 	rolePlaceholderWorkflowLabel = "workflow"
@@ -88,6 +88,10 @@ type Monitor struct {
 	logger        *slog.Logger
 	slotCounter   atomic.Int64 // monotonic counter for unique slot IDs
 	recorder      metrics.CapacityRecorder
+	// nodeWatcher is nil unless EnableNodeSchedulabilityCheck is set. It
+	// backs the placeholder node-schedulability check with a shared node
+	// informer/lister. See schedulability.go.
+	nodeWatcher *nodeSchedulabilityWatcher
 }
 
 // Option configures a Monitor at construction time. Use WithRecorder to
@@ -141,6 +145,9 @@ func New(
 	for _, opt := range opts {
 		opt(m)
 	}
+	// Node informer/lister for the placeholder schedulability check. nil
+	// (core counting) unless the check is enabled.
+	m.nodeWatcher = newNodeSchedulabilityWatcher(clientset, m.config.EnableNodeSchedulabilityCheck)
 	// Static gauges set once at construction so they appear in Prometheus
 	// scrapes even before the first reconcile cycle runs.
 	m.recorder.SetProactiveCapacity(m.config.ProactiveCapacity)
@@ -205,7 +212,8 @@ func (m *Monitor) listPairsWithRetry(ctx context.Context, maxRetries int) (map[s
 func (m *Monitor) countRunnersByPhaseWithRetry(ctx context.Context, maxRetries int) (map[corev1.PodPhase]int, error) {
 	counts := make(map[corev1.PodPhase]int)
 	err := retryWithBackoff(ctx, m.logger, "count-runners", maxRetries, func() error {
-		sel := fmt.Sprintf("actions-ephemeral-runner=True,%s=%s",
+		sel := fmt.Sprintf("%s=%s,%s=%s",
+			labelEphemeralRunner, labelEphemeralRunnerValue,
 			labelScaleSet, m.config.ScaleSetName,
 		)
 		pods, e := m.clientset.CoreV1().Pods(m.config.Namespace).List(ctx, metav1.ListOptions{
@@ -269,7 +277,14 @@ func (m *Monitor) Run(ctx context.Context) error {
 		"runnerNodeFleet", m.config.RunnerNodeFleet,
 		"recalculateInterval", m.config.RecalculateInterval,
 		"reportInterval", m.config.ReportInterval,
+		"nodeSchedulabilityCheck", m.config.EnableNodeSchedulabilityCheck,
 	)
+
+	// Start the node informer (if enabled), non-blocking. Each reporter cycle
+	// consults the informer's live sync state, so cycles before the cache
+	// syncs degrade to core counting and self-heal once it catches up — a slow
+	// or late node-RBAC grant never wedges startup nor latches the check off.
+	m.nodeWatcher.start(ctx, m.logger)
 
 	// Clean up orphaned placeholders from previous listener instances.
 	// CleanupOrphans uses DeleteCollection (atomic from caller's view): the
@@ -581,33 +596,27 @@ func (m *Monitor) reconcileReporting(ctx context.Context) {
 		m.recorder.ObserveReconcileDuration(reconcilePhaseReporter, time.Since(start))
 	}()
 
-	// 1. List pairs with retry. On failure, keep previous capacity unchanged.
-	pairs, err := m.listPairsWithRetry(ctx, reporterMaxRetries)
+	// 1. One atomic namespace pod snapshot. On failure, keep previous
+	// capacity unchanged.
+	pods, err := m.listNamespacePodsWithRetry(ctx, reporterMaxRetries)
 	if err != nil {
-		m.logger.Warn("failed to list pairs, keeping previous capacity", "error", err)
-		m.recorder.IncReconcileSkips(skipReasonReporterListPairs)
+		m.logger.Warn("failed to list namespace pods, keeping previous capacity", "error", err)
+		m.recorder.IncReconcileSkips(skipReasonReporterListPods)
 		return
 	}
 
-	runningPairs := 0
-	for _, pair := range pairs {
-		if pair.BothRunning() {
-			runningPairs++
-		}
-	}
-	m.recorder.SetRunningPairs(runningPairs)
+	// 2. Classify into fungible runner/workflow halves (real + placeholder),
+	// gating placeholders on node schedulability when enabled.
+	counts := classifyCapacityPods(pods, m.config.ScaleSetName, m.placeholders.listenerID, m.placeholderSchedulabilityChecker())
+	m.recorder.SetRunningPairs(counts.runningPairs)
+	m.recorder.SetScheduledRunnerSide(counts.runnerSide())
+	m.recorder.SetScheduledWorkflowSide(counts.workflowSide())
+	m.recorder.SetStarvedRunners(counts.starvedRunners())
+	m.recorder.SetUnschedulablePlaceholders(counts.unschedulablePlaceholders)
 
-	// 2. Count running runners with retry. On failure, keep previous capacity.
-	counts, err := m.countRunnersByPhaseWithRetry(ctx, reporterMaxRetries)
-	if err != nil {
-		m.logger.Warn("failed to count runners, keeping previous capacity", "error", err)
-		m.recorder.IncReconcileSkips(skipReasonReporterCountRunners)
-		return
-	}
-	runningRunners := counts[corev1.PodRunning]
-
-	// 3. Report capacity to GitHub.
-	capacity := runningRunners + runningPairs
+	// 3. Report capacity to GitHub: the scarcer of the two sides, then the
+	// existing MaxRunners clamp (the unlimited sentinel disables it).
+	capacity := counts.capacity()
 	if m.config.MaxRunners < unlimitedMaxRunners {
 		capacity = min(capacity, m.config.MaxRunners)
 	}
@@ -617,13 +626,19 @@ func (m *Monitor) reconcileReporting(ctx context.Context) {
 	m.setMaxRunners(capacity)
 
 	m.logger.Info("capacity reported",
-		"runningPairs", runningPairs,
-		"runningRunners", runningRunners,
+		"runnerSide", counts.runnerSide(),
+		"workflowSide", counts.workflowSide(),
+		"realRunners", counts.realRunners,
+		"realWorkflows", counts.realWorkflows,
+		"placeholderRunners", counts.placeholderRunners,
+		"placeholderWorkflows", counts.placeholderWorkflows,
+		"runningPairs", counts.runningPairs,
+		"unschedulablePlaceholders", counts.unschedulablePlaceholders,
 		"reportedCapacity", capacity,
 	)
-	// Mark success only at the end of a fully completed cycle. Early-exit
-	// paths above (list-pairs error, count-runners error) do NOT mark
-	// success — wedge detection depends on this.
+	// Mark success only at the end of a fully completed cycle. The early-exit
+	// list-pods error path above does NOT mark success — wedge detection
+	// depends on this.
 	m.recorder.SetReconcileLastSuccess(reconcilePhaseReporter, time.Now())
 }
 

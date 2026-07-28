@@ -442,8 +442,9 @@ func TestExporterCapacityRecorder_Counters(t *testing.T) {
 
 	for _, reason := range []string{
 		"provisioner_list_pairs",
-		"reporter_list_pairs",
-		"reporter_count_runners",
+		"provisioner_list_runners",
+		"reporter_list_pods",
+		"reporter_node_cache_unsynced",
 		"hud_api_failed",
 	} {
 		e.IncReconcileSkips(reason)

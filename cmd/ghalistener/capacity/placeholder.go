@@ -587,9 +587,6 @@ func (pm *PlaceholderManager) placeholderPodShell(
 			Namespace:       pm.namespace,
 			Labels:          labels,
 			OwnerReferences: ownerRefs,
-			Annotations: map[string]string{
-				"karpenter.sh/do-not-disrupt": "true",
-			},
 		},
 		Spec: corev1.PodSpec{
 			Containers: []corev1.Container{

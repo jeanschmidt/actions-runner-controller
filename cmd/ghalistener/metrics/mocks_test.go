@@ -570,6 +570,166 @@ func (_c *MockCapacityRecorder_SetAdvertisedMaxRunners_Call) RunAndReturn(run fu
 	return _c
 }
 
+// SetScheduledRunnerSide provides a mock function for the type MockCapacityRecorder
+func (_mock *MockCapacityRecorder) SetScheduledRunnerSide(value int) {
+	_mock.Called(value)
+	return
+}
+
+// MockCapacityRecorder_SetScheduledRunnerSide_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetScheduledRunnerSide'
+type MockCapacityRecorder_SetScheduledRunnerSide_Call struct {
+	*mock.Call
+}
+
+// SetScheduledRunnerSide is a helper method to define mock.On call
+//   - value int
+func (_e *MockCapacityRecorder_Expecter) SetScheduledRunnerSide(value interface{}) *MockCapacityRecorder_SetScheduledRunnerSide_Call {
+	return &MockCapacityRecorder_SetScheduledRunnerSide_Call{Call: _e.mock.On("SetScheduledRunnerSide", value)}
+}
+
+func (_c *MockCapacityRecorder_SetScheduledRunnerSide_Call) Run(run func(value int)) *MockCapacityRecorder_SetScheduledRunnerSide_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 int
+		if args[0] != nil {
+			arg0 = args[0].(int)
+		}
+		run(
+			arg0,
+		)
+	})
+	return _c
+}
+
+func (_c *MockCapacityRecorder_SetScheduledRunnerSide_Call) Return() *MockCapacityRecorder_SetScheduledRunnerSide_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockCapacityRecorder_SetScheduledRunnerSide_Call) RunAndReturn(run func(value int)) *MockCapacityRecorder_SetScheduledRunnerSide_Call {
+	_c.Run(run)
+	return _c
+}
+
+// SetScheduledWorkflowSide provides a mock function for the type MockCapacityRecorder
+func (_mock *MockCapacityRecorder) SetScheduledWorkflowSide(value int) {
+	_mock.Called(value)
+	return
+}
+
+// MockCapacityRecorder_SetScheduledWorkflowSide_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetScheduledWorkflowSide'
+type MockCapacityRecorder_SetScheduledWorkflowSide_Call struct {
+	*mock.Call
+}
+
+// SetScheduledWorkflowSide is a helper method to define mock.On call
+//   - value int
+func (_e *MockCapacityRecorder_Expecter) SetScheduledWorkflowSide(value interface{}) *MockCapacityRecorder_SetScheduledWorkflowSide_Call {
+	return &MockCapacityRecorder_SetScheduledWorkflowSide_Call{Call: _e.mock.On("SetScheduledWorkflowSide", value)}
+}
+
+func (_c *MockCapacityRecorder_SetScheduledWorkflowSide_Call) Run(run func(value int)) *MockCapacityRecorder_SetScheduledWorkflowSide_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 int
+		if args[0] != nil {
+			arg0 = args[0].(int)
+		}
+		run(
+			arg0,
+		)
+	})
+	return _c
+}
+
+func (_c *MockCapacityRecorder_SetScheduledWorkflowSide_Call) Return() *MockCapacityRecorder_SetScheduledWorkflowSide_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockCapacityRecorder_SetScheduledWorkflowSide_Call) RunAndReturn(run func(value int)) *MockCapacityRecorder_SetScheduledWorkflowSide_Call {
+	_c.Run(run)
+	return _c
+}
+
+// SetStarvedRunners provides a mock function for the type MockCapacityRecorder
+func (_mock *MockCapacityRecorder) SetStarvedRunners(value int) {
+	_mock.Called(value)
+	return
+}
+
+// MockCapacityRecorder_SetStarvedRunners_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetStarvedRunners'
+type MockCapacityRecorder_SetStarvedRunners_Call struct {
+	*mock.Call
+}
+
+// SetStarvedRunners is a helper method to define mock.On call
+//   - value int
+func (_e *MockCapacityRecorder_Expecter) SetStarvedRunners(value interface{}) *MockCapacityRecorder_SetStarvedRunners_Call {
+	return &MockCapacityRecorder_SetStarvedRunners_Call{Call: _e.mock.On("SetStarvedRunners", value)}
+}
+
+func (_c *MockCapacityRecorder_SetStarvedRunners_Call) Run(run func(value int)) *MockCapacityRecorder_SetStarvedRunners_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 int
+		if args[0] != nil {
+			arg0 = args[0].(int)
+		}
+		run(
+			arg0,
+		)
+	})
+	return _c
+}
+
+func (_c *MockCapacityRecorder_SetStarvedRunners_Call) Return() *MockCapacityRecorder_SetStarvedRunners_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockCapacityRecorder_SetStarvedRunners_Call) RunAndReturn(run func(value int)) *MockCapacityRecorder_SetStarvedRunners_Call {
+	_c.Run(run)
+	return _c
+}
+
+// SetUnschedulablePlaceholders provides a mock function for the type MockCapacityRecorder
+func (_mock *MockCapacityRecorder) SetUnschedulablePlaceholders(value int) {
+	_mock.Called(value)
+	return
+}
+
+// MockCapacityRecorder_SetUnschedulablePlaceholders_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetUnschedulablePlaceholders'
+type MockCapacityRecorder_SetUnschedulablePlaceholders_Call struct {
+	*mock.Call
+}
+
+// SetUnschedulablePlaceholders is a helper method to define mock.On call
+//   - value int
+func (_e *MockCapacityRecorder_Expecter) SetUnschedulablePlaceholders(value interface{}) *MockCapacityRecorder_SetUnschedulablePlaceholders_Call {
+	return &MockCapacityRecorder_SetUnschedulablePlaceholders_Call{Call: _e.mock.On("SetUnschedulablePlaceholders", value)}
+}
+
+func (_c *MockCapacityRecorder_SetUnschedulablePlaceholders_Call) Run(run func(value int)) *MockCapacityRecorder_SetUnschedulablePlaceholders_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 int
+		if args[0] != nil {
+			arg0 = args[0].(int)
+		}
+		run(
+			arg0,
+		)
+	})
+	return _c
+}
+
+func (_c *MockCapacityRecorder_SetUnschedulablePlaceholders_Call) Return() *MockCapacityRecorder_SetUnschedulablePlaceholders_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockCapacityRecorder_SetUnschedulablePlaceholders_Call) RunAndReturn(run func(value int)) *MockCapacityRecorder_SetUnschedulablePlaceholders_Call {
+	_c.Run(run)
+	return _c
+}
+
 // SetDesiredPairs provides a mock function for the type MockCapacityRecorder
 func (_mock *MockCapacityRecorder) SetDesiredPairs(value int) {
 	_mock.Called(value)
@@ -1566,6 +1726,166 @@ func (_c *MockServerExporter_SetAdvertisedMaxRunners_Call) Return() *MockServerE
 }
 
 func (_c *MockServerExporter_SetAdvertisedMaxRunners_Call) RunAndReturn(run func(value int)) *MockServerExporter_SetAdvertisedMaxRunners_Call {
+	_c.Run(run)
+	return _c
+}
+
+// SetScheduledRunnerSide provides a mock function for the type MockServerExporter
+func (_mock *MockServerExporter) SetScheduledRunnerSide(value int) {
+	_mock.Called(value)
+	return
+}
+
+// MockServerExporter_SetScheduledRunnerSide_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetScheduledRunnerSide'
+type MockServerExporter_SetScheduledRunnerSide_Call struct {
+	*mock.Call
+}
+
+// SetScheduledRunnerSide is a helper method to define mock.On call
+//   - value int
+func (_e *MockServerExporter_Expecter) SetScheduledRunnerSide(value interface{}) *MockServerExporter_SetScheduledRunnerSide_Call {
+	return &MockServerExporter_SetScheduledRunnerSide_Call{Call: _e.mock.On("SetScheduledRunnerSide", value)}
+}
+
+func (_c *MockServerExporter_SetScheduledRunnerSide_Call) Run(run func(value int)) *MockServerExporter_SetScheduledRunnerSide_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 int
+		if args[0] != nil {
+			arg0 = args[0].(int)
+		}
+		run(
+			arg0,
+		)
+	})
+	return _c
+}
+
+func (_c *MockServerExporter_SetScheduledRunnerSide_Call) Return() *MockServerExporter_SetScheduledRunnerSide_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockServerExporter_SetScheduledRunnerSide_Call) RunAndReturn(run func(value int)) *MockServerExporter_SetScheduledRunnerSide_Call {
+	_c.Run(run)
+	return _c
+}
+
+// SetScheduledWorkflowSide provides a mock function for the type MockServerExporter
+func (_mock *MockServerExporter) SetScheduledWorkflowSide(value int) {
+	_mock.Called(value)
+	return
+}
+
+// MockServerExporter_SetScheduledWorkflowSide_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetScheduledWorkflowSide'
+type MockServerExporter_SetScheduledWorkflowSide_Call struct {
+	*mock.Call
+}
+
+// SetScheduledWorkflowSide is a helper method to define mock.On call
+//   - value int
+func (_e *MockServerExporter_Expecter) SetScheduledWorkflowSide(value interface{}) *MockServerExporter_SetScheduledWorkflowSide_Call {
+	return &MockServerExporter_SetScheduledWorkflowSide_Call{Call: _e.mock.On("SetScheduledWorkflowSide", value)}
+}
+
+func (_c *MockServerExporter_SetScheduledWorkflowSide_Call) Run(run func(value int)) *MockServerExporter_SetScheduledWorkflowSide_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 int
+		if args[0] != nil {
+			arg0 = args[0].(int)
+		}
+		run(
+			arg0,
+		)
+	})
+	return _c
+}
+
+func (_c *MockServerExporter_SetScheduledWorkflowSide_Call) Return() *MockServerExporter_SetScheduledWorkflowSide_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockServerExporter_SetScheduledWorkflowSide_Call) RunAndReturn(run func(value int)) *MockServerExporter_SetScheduledWorkflowSide_Call {
+	_c.Run(run)
+	return _c
+}
+
+// SetStarvedRunners provides a mock function for the type MockServerExporter
+func (_mock *MockServerExporter) SetStarvedRunners(value int) {
+	_mock.Called(value)
+	return
+}
+
+// MockServerExporter_SetStarvedRunners_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetStarvedRunners'
+type MockServerExporter_SetStarvedRunners_Call struct {
+	*mock.Call
+}
+
+// SetStarvedRunners is a helper method to define mock.On call
+//   - value int
+func (_e *MockServerExporter_Expecter) SetStarvedRunners(value interface{}) *MockServerExporter_SetStarvedRunners_Call {
+	return &MockServerExporter_SetStarvedRunners_Call{Call: _e.mock.On("SetStarvedRunners", value)}
+}
+
+func (_c *MockServerExporter_SetStarvedRunners_Call) Run(run func(value int)) *MockServerExporter_SetStarvedRunners_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 int
+		if args[0] != nil {
+			arg0 = args[0].(int)
+		}
+		run(
+			arg0,
+		)
+	})
+	return _c
+}
+
+func (_c *MockServerExporter_SetStarvedRunners_Call) Return() *MockServerExporter_SetStarvedRunners_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockServerExporter_SetStarvedRunners_Call) RunAndReturn(run func(value int)) *MockServerExporter_SetStarvedRunners_Call {
+	_c.Run(run)
+	return _c
+}
+
+// SetUnschedulablePlaceholders provides a mock function for the type MockServerExporter
+func (_mock *MockServerExporter) SetUnschedulablePlaceholders(value int) {
+	_mock.Called(value)
+	return
+}
+
+// MockServerExporter_SetUnschedulablePlaceholders_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetUnschedulablePlaceholders'
+type MockServerExporter_SetUnschedulablePlaceholders_Call struct {
+	*mock.Call
+}
+
+// SetUnschedulablePlaceholders is a helper method to define mock.On call
+//   - value int
+func (_e *MockServerExporter_Expecter) SetUnschedulablePlaceholders(value interface{}) *MockServerExporter_SetUnschedulablePlaceholders_Call {
+	return &MockServerExporter_SetUnschedulablePlaceholders_Call{Call: _e.mock.On("SetUnschedulablePlaceholders", value)}
+}
+
+func (_c *MockServerExporter_SetUnschedulablePlaceholders_Call) Run(run func(value int)) *MockServerExporter_SetUnschedulablePlaceholders_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 int
+		if args[0] != nil {
+			arg0 = args[0].(int)
+		}
+		run(
+			arg0,
+		)
+	})
+	return _c
+}
+
+func (_c *MockServerExporter_SetUnschedulablePlaceholders_Call) Return() *MockServerExporter_SetUnschedulablePlaceholders_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockServerExporter_SetUnschedulablePlaceholders_Call) RunAndReturn(run func(value int)) *MockServerExporter_SetUnschedulablePlaceholders_Call {
 	_c.Run(run)
 	return _c
 }

@@ -37,6 +37,7 @@ func unsetEnvs(t *testing.T, keys []string) {
 func TestConfigFromEnv_Defaults(t *testing.T) {
 	keys := []string{
 		"CAPACITY_AWARE_ENABLED",
+		"CAPACITY_AWARE_ENABLE_NODE_SCHEDULABILITY_CHECK",
 		"CAPACITY_AWARE_PROACTIVE_CAPACITY",
 		"CAPACITY_AWARE_RECALCULATE_INTERVAL",
 		"CAPACITY_AWARE_PLACEHOLDER_TIMEOUT",
@@ -59,6 +60,7 @@ func TestConfigFromEnv_Defaults(t *testing.T) {
 	cfg := ConfigFromEnv()
 
 	assert.False(t, cfg.Enabled, "Enabled default")
+	assert.True(t, cfg.EnableNodeSchedulabilityCheck, "EnableNodeSchedulabilityCheck default on")
 	assert.Equal(t, 0, cfg.ProactiveCapacity, "ProactiveCapacity default")
 	assert.Equal(t, 60*time.Second, cfg.RecalculateInterval, "RecalculateInterval default")
 	assert.Equal(t, 5*time.Minute, cfg.PlaceholderTimeout, "PlaceholderTimeout default")
@@ -85,28 +87,30 @@ func TestConfigFromEnv_Defaults(t *testing.T) {
 
 func TestConfigFromEnv_AllSet(t *testing.T) {
 	setEnvs(t, map[string]string{
-		"CAPACITY_AWARE_ENABLED":                   "true",
-		"CAPACITY_AWARE_PROACTIVE_CAPACITY":        "5",
-		"CAPACITY_AWARE_RECALCULATE_INTERVAL":      "10s",
-		"CAPACITY_AWARE_PLACEHOLDER_TIMEOUT":       "2m",
-		"CAPACITY_AWARE_WORKFLOW_CPU":              "4",
-		"CAPACITY_AWARE_WORKFLOW_MEMORY":           "8Gi",
-		"CAPACITY_AWARE_WORKFLOW_GPU":              "2",
-		"CAPACITY_AWARE_WORKFLOW_DISK":             "100Gi",
-		"CAPACITY_AWARE_WORKFLOW_SCHEDULER_NAME":   "numa-scheduler",
-		"CAPACITY_AWARE_RUNNER_CPU":                "1",
-		"CAPACITY_AWARE_RUNNER_MEMORY":             "1Gi",
-		"CAPACITY_AWARE_NODE_FLEET":                "gpu-fleet",
-		"CAPACITY_AWARE_RUNNER_NODE_FLEET":         "c7i-runner",
-		"CAPACITY_AWARE_RUNNER_CLASS":              "gpu-large",
-		"CAPACITY_AWARE_HUD_API_TOKEN":             "secret-token",
-		"CAPACITY_AWARE_HUD_FAILURE_MULTIPLIER":    "5",
-		"CAPACITY_AWARE_HUD_FAILURE_BASE_CAPACITY": "15",
+		"CAPACITY_AWARE_ENABLED":                          "true",
+		"CAPACITY_AWARE_ENABLE_NODE_SCHEDULABILITY_CHECK": "false",
+		"CAPACITY_AWARE_PROACTIVE_CAPACITY":               "5",
+		"CAPACITY_AWARE_RECALCULATE_INTERVAL":             "10s",
+		"CAPACITY_AWARE_PLACEHOLDER_TIMEOUT":              "2m",
+		"CAPACITY_AWARE_WORKFLOW_CPU":                     "4",
+		"CAPACITY_AWARE_WORKFLOW_MEMORY":                  "8Gi",
+		"CAPACITY_AWARE_WORKFLOW_GPU":                     "2",
+		"CAPACITY_AWARE_WORKFLOW_DISK":                    "100Gi",
+		"CAPACITY_AWARE_WORKFLOW_SCHEDULER_NAME":          "numa-scheduler",
+		"CAPACITY_AWARE_RUNNER_CPU":                       "1",
+		"CAPACITY_AWARE_RUNNER_MEMORY":                    "1Gi",
+		"CAPACITY_AWARE_NODE_FLEET":                       "gpu-fleet",
+		"CAPACITY_AWARE_RUNNER_NODE_FLEET":                "c7i-runner",
+		"CAPACITY_AWARE_RUNNER_CLASS":                     "gpu-large",
+		"CAPACITY_AWARE_HUD_API_TOKEN":                    "secret-token",
+		"CAPACITY_AWARE_HUD_FAILURE_MULTIPLIER":           "5",
+		"CAPACITY_AWARE_HUD_FAILURE_BASE_CAPACITY":        "15",
 	})
 
 	cfg := ConfigFromEnv()
 
 	assert.True(t, cfg.Enabled)
+	assert.False(t, cfg.EnableNodeSchedulabilityCheck, "explicit false must be honored")
 	assert.Equal(t, 5, cfg.ProactiveCapacity)
 	assert.Equal(t, 10*time.Second, cfg.RecalculateInterval)
 	assert.Equal(t, 2*time.Minute, cfg.PlaceholderTimeout)

@@ -44,6 +44,12 @@ type Config struct {
 	// (git-cache rsync connection pool, Harbor manifest fetches, pypi-cache).
 	MaxBurstCapacity int
 
+	// EnableNodeSchedulabilityCheck gates placeholder counting on whether the
+	// placeholder's node can still host a replacement real pod (cordon /
+	// disruption taints exclude it). Requires node get/list/watch RBAC; when
+	// node reads are unavailable the reporter degrades to core counting.
+	EnableNodeSchedulabilityCheck bool
+
 	// Workflow pod resources (for placeholder-workflow sizing)
 	WorkflowCPU    string
 	WorkflowMemory string
@@ -110,31 +116,32 @@ type Config struct {
 // zero values and must be set by the caller.
 func ConfigFromEnv() Config {
 	c := Config{
-		Enabled:                envBool("CAPACITY_AWARE_ENABLED", false),
-		ProactiveCapacity:      envInt("CAPACITY_AWARE_PROACTIVE_CAPACITY", 0),
-		MaxBurstCapacity:       envInt("CAPACITY_AWARE_MAX_BURST_CAPACITY", 0),
-		RecalculateInterval:    envDuration("CAPACITY_AWARE_RECALCULATE_INTERVAL", 60*time.Second),
-		ReportInterval:         envDuration("CAPACITY_AWARE_REPORT_INTERVAL", 5*time.Second),
-		PlaceholderTimeout:     envDuration("CAPACITY_AWARE_PLACEHOLDER_TIMEOUT", 5*time.Minute),
-		WorkflowCPU:            envString("CAPACITY_AWARE_WORKFLOW_CPU", ""),
-		WorkflowMemory:         envString("CAPACITY_AWARE_WORKFLOW_MEMORY", ""),
-		WorkflowGPU:            envInt("CAPACITY_AWARE_WORKFLOW_GPU", 0),
-		WorkflowDisk:           envString("CAPACITY_AWARE_WORKFLOW_DISK", ""),
-		WorkflowSchedulerName:  envString("CAPACITY_AWARE_WORKFLOW_SCHEDULER_NAME", ""),
-		RunnerCPU:              envString("CAPACITY_AWARE_RUNNER_CPU", "750m"),
-		RunnerMemory:           envString("CAPACITY_AWARE_RUNNER_MEMORY", "512Mi"),
-		NodeFleet:              envString("CAPACITY_AWARE_NODE_FLEET", ""),
-		RunnerNodeFleet:        envString("CAPACITY_AWARE_RUNNER_NODE_FLEET", ""),
-		RunnerClass:            envString("CAPACITY_AWARE_RUNNER_CLASS", ""),
-		HUDAPIURL:              envString("CAPACITY_AWARE_HUD_API_URL", defaultHUDAPIURL),
-		HUDAPIToken:            envString("CAPACITY_AWARE_HUD_API_TOKEN", ""),
-		HUDFailureMultiplier:   envInt("CAPACITY_AWARE_HUD_FAILURE_MULTIPLIER", defaultHUDFailureMultiplier),
-		HUDFailureBaseCapacity: envInt("CAPACITY_AWARE_HUD_FAILURE_BASE_CAPACITY", 0),
-		ClusterIndex:           envInt("CAPACITY_AWARE_CLUSTER_INDEX", 0),
-		ClusterCount:           envInt("CAPACITY_AWARE_CLUSTER_COUNT", 1),
-		AgeThresholdSeconds:    envInt("CAPACITY_AWARE_AGE_THRESHOLD_SECONDS", 0),
-		FreshMultiplier:        envFloat("CAPACITY_AWARE_FRESH_MULTIPLIER", 1.0),
-		AgedMultiplier:         envFloat("CAPACITY_AWARE_AGED_MULTIPLIER", 1.0),
+		Enabled:                       envBool("CAPACITY_AWARE_ENABLED", false),
+		EnableNodeSchedulabilityCheck: envBool("CAPACITY_AWARE_ENABLE_NODE_SCHEDULABILITY_CHECK", true),
+		ProactiveCapacity:             envInt("CAPACITY_AWARE_PROACTIVE_CAPACITY", 0),
+		MaxBurstCapacity:              envInt("CAPACITY_AWARE_MAX_BURST_CAPACITY", 0),
+		RecalculateInterval:           envDuration("CAPACITY_AWARE_RECALCULATE_INTERVAL", 60*time.Second),
+		ReportInterval:                envDuration("CAPACITY_AWARE_REPORT_INTERVAL", 5*time.Second),
+		PlaceholderTimeout:            envDuration("CAPACITY_AWARE_PLACEHOLDER_TIMEOUT", 5*time.Minute),
+		WorkflowCPU:                   envString("CAPACITY_AWARE_WORKFLOW_CPU", ""),
+		WorkflowMemory:                envString("CAPACITY_AWARE_WORKFLOW_MEMORY", ""),
+		WorkflowGPU:                   envInt("CAPACITY_AWARE_WORKFLOW_GPU", 0),
+		WorkflowDisk:                  envString("CAPACITY_AWARE_WORKFLOW_DISK", ""),
+		WorkflowSchedulerName:         envString("CAPACITY_AWARE_WORKFLOW_SCHEDULER_NAME", ""),
+		RunnerCPU:                     envString("CAPACITY_AWARE_RUNNER_CPU", "750m"),
+		RunnerMemory:                  envString("CAPACITY_AWARE_RUNNER_MEMORY", "512Mi"),
+		NodeFleet:                     envString("CAPACITY_AWARE_NODE_FLEET", ""),
+		RunnerNodeFleet:               envString("CAPACITY_AWARE_RUNNER_NODE_FLEET", ""),
+		RunnerClass:                   envString("CAPACITY_AWARE_RUNNER_CLASS", ""),
+		HUDAPIURL:                     envString("CAPACITY_AWARE_HUD_API_URL", defaultHUDAPIURL),
+		HUDAPIToken:                   envString("CAPACITY_AWARE_HUD_API_TOKEN", ""),
+		HUDFailureMultiplier:          envInt("CAPACITY_AWARE_HUD_FAILURE_MULTIPLIER", defaultHUDFailureMultiplier),
+		HUDFailureBaseCapacity:        envInt("CAPACITY_AWARE_HUD_FAILURE_BASE_CAPACITY", 0),
+		ClusterIndex:                  envInt("CAPACITY_AWARE_CLUSTER_INDEX", 0),
+		ClusterCount:                  envInt("CAPACITY_AWARE_CLUSTER_COUNT", 1),
+		AgeThresholdSeconds:           envInt("CAPACITY_AWARE_AGE_THRESHOLD_SECONDS", 0),
+		FreshMultiplier:               envFloat("CAPACITY_AWARE_FRESH_MULTIPLIER", 1.0),
+		AgedMultiplier:                envFloat("CAPACITY_AWARE_AGED_MULTIPLIER", 1.0),
 	}
 
 	if c.ProactiveCapacity < 0 {
