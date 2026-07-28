@@ -256,7 +256,7 @@ func TestReconcile_SetMaxRunners_CapAtMaxRunners(t *testing.T) {
 		require.NoError(t, err)
 	}
 	// Their job pods are scheduled (Running), so they count as secured capacity.
-	createJobPods(t, cs, "test-ns", []string{"runner-a", "runner-b", "runner-c"}, corev1.PodRunning)
+	createJobPods(t, cs, "test-ns", []string{"runner-a", "runner-b", "runner-c"}, corev1.PodRunning, "test-sset")
 
 	m.reconcileProvisioning(ctx)
 	m.reconcileReporting(ctx)
@@ -604,7 +604,7 @@ func TestReconcile_MaxRunnersUnset_IsUnlimited(t *testing.T) {
 	}
 	createRealRunnerPods(t, cs, "test-ns", "test-sset", 7, corev1.PodRunning, "runner")
 	// Their job pods are scheduled (Running), so they count as secured capacity.
-	createJobPods(t, cs, "test-ns", jobPodNames("runner", 7), corev1.PodRunning)
+	createJobPods(t, cs, "test-ns", jobPodNames("runner", 7), corev1.PodRunning, "test-sset")
 
 	m.reconcileProvisioning(ctx)
 	m.reconcileReporting(ctx)
@@ -633,14 +633,38 @@ func TestReconcile_StuckRunnerNotCountedAsCapacity(t *testing.T) {
 
 	// 3 Running runner pods: one scheduled, two GPU-starved (job pod Pending).
 	createRealRunnerPods(t, cs, "test-ns", "test-sset", 3, corev1.PodRunning, "runner")
-	createJobPods(t, cs, "test-ns", []string{"runner-0"}, corev1.PodRunning)
-	createJobPods(t, cs, "test-ns", []string{"runner-1", "runner-2"}, corev1.PodPending)
+	createJobPods(t, cs, "test-ns", []string{"runner-0"}, corev1.PodRunning, "test-sset")
+	createJobPods(t, cs, "test-ns", []string{"runner-1", "runner-2"}, corev1.PodPending, "test-sset")
 
 	m.reconcileReporting(ctx)
 
 	// Only runner-0 (job pod Running) counts. The two stuck runners do not.
 	assert.Equal(t, int32(1), maxVal.Load(),
 		"runners whose job pod is Pending must not advertise phantom capacity")
+}
+
+// TestReconcile_JobPodMissingLabel_FallsBackToNamespaceList verifies the
+// deploy-ordering safety net: when job pods lack labelJobScaleSet (label not yet
+// deployed), the scoped List is empty but the namespace-wide fallback still finds
+// them, so capacity is not under-reported to zero.
+func TestReconcile_JobPodMissingLabel_FallsBackToNamespaceList(t *testing.T) {
+	cfg := Config{
+		ProactiveCapacity:  0,
+		MaxRunners:         unlimitedMaxRunners,
+		ScaleSetName:       "test-sset",
+		PlaceholderTimeout: 5 * time.Minute,
+	}
+	m, cs, maxVal := newTestMonitor(t, cfg, nil)
+	ctx := context.Background()
+
+	createRealRunnerPods(t, cs, "test-ns", "test-sset", 2, corev1.PodRunning, "runner")
+	// Unlabeled job pods (scaleSet="") — the scoped List won't match them.
+	createJobPods(t, cs, "test-ns", jobPodNames("runner", 2), corev1.PodRunning, "")
+
+	m.reconcileReporting(ctx)
+
+	assert.Equal(t, int32(2), maxVal.Load(),
+		"fallback must count job pods even when the scale-set label is absent")
 }
 
 func TestRunLoop_CancellationCleansUp(t *testing.T) {
@@ -1250,17 +1274,21 @@ func createRealRunnerPods(
 }
 
 // createJobPods creates a real job pod ("<runner>-workflow") for each named
-// runner in the given phase. Job pods carry no placeholder role label — matching
-// what runner-container-hooks produce — so countScheduledRunnersWithRetry treats
-// them as the runner's scheduled workload.
-func createJobPods(t *testing.T, cs *fake.Clientset, ns string, runnerNames []string, phase corev1.PodPhase) {
+// runner in the given phase. scaleSet, when non-empty, stamps labelJobScaleSet
+// (exercising the scoped List path); "" leaves it unlabeled (fallback path).
+func createJobPods(t *testing.T, cs *fake.Clientset, ns string, runnerNames []string, phase corev1.PodPhase, scaleSet string) {
 	t.Helper()
 	ctx := context.Background()
 	for _, rn := range runnerNames {
+		labels := map[string]string{}
+		if scaleSet != "" {
+			labels[labelJobScaleSet] = scaleSet
+		}
 		pod := &corev1.Pod{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      rn + "-workflow",
 				Namespace: ns,
+				Labels:    labels,
 			},
 			Spec:   corev1.PodSpec{Containers: []corev1.Container{{Name: "job", Image: "job:latest"}}},
 			Status: corev1.PodStatus{Phase: phase},

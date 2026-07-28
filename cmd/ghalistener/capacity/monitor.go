@@ -228,14 +228,20 @@ func (m *Monitor) countRunnersByPhaseWithRetry(ctx context.Context, maxRetries i
 	return counts, err
 }
 
+// labelJobScaleSet is stamped on job pods (by the OSDC hook template) with the
+// scale-set name, letting the reporter scope its job-pod List instead of listing
+// the whole namespace. Job pods carry no ARC scale-set label of their own.
+const labelJobScaleSet = "osdc.io/scale-set-name"
+
 // countScheduledRunnersWithRetry returns the number of EphemeralRunner pods for
 // this scale set whose job pod ("<runner>-workflow") is Running — i.e. secured a
-// node, not merely started the runner container. Job pods carry no scale-set
-// label, so they're matched by name (placeholders excluded via role label).
-// Runners with a missing/Pending job pod are not counted.
+// node, not merely started the runner container. Runners with a missing/Pending
+// job pod are not counted.
 //
-// TODO(perf): back the job-pod lookup with a shared informer/lister to avoid a
-// per-cycle namespace List in busy shared namespaces.
+// Job pods are scoped via labelJobScaleSet (placeholders excluded by role label);
+// if that yields nothing while runners are Running — i.e. the label isn't
+// deployed yet — it falls back to a namespace-wide List so a deploy-ordering gap
+// can't zero out advertised capacity. Correlation is by "-workflow" name.
 func (m *Monitor) countScheduledRunnersWithRetry(ctx context.Context, maxRetries int) (int, error) {
 	var scheduled int
 	err := retryWithBackoff(ctx, m.logger, "count-scheduled-runners", maxRetries, func() error {
@@ -248,14 +254,28 @@ func (m *Monitor) countScheduledRunnersWithRetry(ctx context.Context, maxRetries
 		if e != nil {
 			return e
 		}
+		runningRunners := 0
+		for i := range runners.Items {
+			if runners.Items[i].Status.Phase == corev1.PodRunning {
+				runningRunners++
+			}
+		}
 
-		// Job pods in the namespace keyed by name (placeholders excluded via
-		// role label), filtered to "-workflow" names to keep the map small.
+		// Job pods scoped to this scale set (placeholders excluded).
 		jobPods, e := m.clientset.CoreV1().Pods(m.config.Namespace).List(ctx, metav1.ListOptions{
-			LabelSelector: fmt.Sprintf("!%s", labelPlaceholderRole),
+			LabelSelector: fmt.Sprintf("%s=%s,!%s", labelJobScaleSet, m.config.ScaleSetName, labelPlaceholderRole),
 		})
 		if e != nil {
 			return e
+		}
+		// Fallback for the deploy-ordering gap: label not yet on job pods.
+		if len(jobPods.Items) == 0 && runningRunners > 0 {
+			jobPods, e = m.clientset.CoreV1().Pods(m.config.Namespace).List(ctx, metav1.ListOptions{
+				LabelSelector: fmt.Sprintf("!%s", labelPlaceholderRole),
+			})
+			if e != nil {
+				return e
+			}
 		}
 		phaseByName := make(map[string]corev1.PodPhase, len(jobPods.Items))
 		for i := range jobPods.Items {
