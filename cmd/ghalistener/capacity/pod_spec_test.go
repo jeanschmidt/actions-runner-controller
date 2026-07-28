@@ -220,9 +220,12 @@ func TestWorkflowDiskResource(t *testing.T) {
 		"setQuantity must mirror Requests into Limits")
 }
 
-// Both placeholder pods must carry karpenter.sh/do-not-disrupt=true so
-// Karpenter does not consolidate the pre-warmed nodes out from under us.
-func TestPlaceholderPods_KarpenterDoNotDisruptAnnotation(t *testing.T) {
+// Placeholder pods must NOT carry karpenter.sh/do-not-disrupt: they are
+// intentionally Karpenter-disruptable so drift/expiration/consolidation can
+// reclaim their nodes. The reporter's schedulability check drops a placeholder
+// as soon as its node is tainted for disruption, so the count stays honest.
+// (Real runner/workflow pods keep the annotation via the OSDC template.)
+func TestPlaceholderPods_NotKarpenterProtected(t *testing.T) {
 	pm, _ := newTestPM(t, Config{})
 	ctx := context.Background()
 
@@ -232,8 +235,9 @@ func TestPlaceholderPods_KarpenterDoNotDisruptAnnotation(t *testing.T) {
 
 	for _, pod := range []*corev1.Pod{pair.RunnerPod, pair.WorkflowPod} {
 		require.NotNil(t, pod)
-		assert.Equal(t, "true", pod.Annotations["karpenter.sh/do-not-disrupt"],
-			"placeholder pods must opt out of Karpenter consolidation")
+		_, present := pod.Annotations["karpenter.sh/do-not-disrupt"]
+		assert.False(t, present,
+			"placeholder pods must remain Karpenter-disruptable")
 	}
 }
 

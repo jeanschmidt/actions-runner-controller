@@ -236,25 +236,9 @@ func TestReconcile_SetMaxRunners_CapAtMaxRunners(t *testing.T) {
 	m, cs, maxVal := newTestMonitor(t, cfg, nil)
 	ctx := context.Background()
 
-	// Create some "real" ephemeral runner pods.
-	for i := 0; i < 3; i++ {
-		pod := &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "runner-" + string(rune('a'+i)),
-				Namespace: "test-ns",
-				Labels: map[string]string{
-					"actions-ephemeral-runner": "True",
-					labelScaleSet:              "test-sset",
-				},
-			},
-			Spec: corev1.PodSpec{
-				Containers: []corev1.Container{{Name: "runner", Image: "runner:latest"}},
-			},
-			Status: corev1.PodStatus{Phase: corev1.PodRunning},
-		}
-		_, err := cs.CoreV1().Pods("test-ns").Create(ctx, pod, metav1.CreateOptions{})
-		require.NoError(t, err)
-	}
+	// 3 real runner+workflow pairs, each bound to a node.
+	createRealRunnerPods(t, cs, "test-ns", "test-sset", 3, corev1.PodRunning, "runner")
+	createRealWorkflowPods(t, cs, "test-ns", 3, corev1.PodRunning, "runner")
 
 	m.reconcileProvisioning(ctx)
 	m.reconcileReporting(ctx)
@@ -268,7 +252,9 @@ func TestReconcile_SetMaxRunners_CapAtMaxRunners(t *testing.T) {
 	m.reconcileProvisioning(ctx)
 	m.reconcileReporting(ctx)
 
-	// capacity = min(runningRunners(3) + runningPairs(2), maxRunners(5)) = 5.
+	// runnerSide = 3 real runners + 2 placeholder-runners = 5;
+	// workflowSide = 3 real workflows + 2 placeholder-workflows = 5;
+	// capacity = min(5, 5) = 5, at the MaxRunners cap.
 	assert.Equal(t, int32(5), maxVal.Load())
 }
 
@@ -559,13 +545,15 @@ func TestReconcile_MaxRunnersZero_IsHardCap(t *testing.T) {
 	// No capacity advertised.
 	assert.Equal(t, int32(0), maxVal.Load())
 
-	// Add real running runner pods: advertised capacity must still clamp to 0.
+	// Add real running runner+workflow pairs: advertised capacity must still
+	// clamp to 0. Uncapped this would be min(7, 7) = 7.
 	createRealRunnerPods(t, cs, "test-ns", "test-sset", 7, corev1.PodRunning, "runner")
+	createRealWorkflowPods(t, cs, "test-ns", 7, corev1.PodRunning, "runner")
 
 	m.reconcileProvisioning(ctx)
 	m.reconcileReporting(ctx)
 
-	// capacity = min(runningRunners(7) + runningPairs(0), MaxRunners(0)) = 0.
+	// capacity = min(min(runnerSide 7, workflowSide 7), MaxRunners(0)) = 0.
 	assert.Equal(t, int32(0), maxVal.Load(),
 		"MaxRunners=0 must clamp reported capacity to 0 even with running runners")
 	// Still no placeholder pairs (drained).
@@ -601,11 +589,13 @@ func TestReconcile_MaxRunnersUnset_IsUnlimited(t *testing.T) {
 		setPodsPhase(t, cs, ctx, "test-ns", slotID, corev1.PodRunning)
 	}
 	createRealRunnerPods(t, cs, "test-ns", "test-sset", 7, corev1.PodRunning, "runner")
+	createRealWorkflowPods(t, cs, "test-ns", 7, corev1.PodRunning, "runner")
 
 	m.reconcileProvisioning(ctx)
 	m.reconcileReporting(ctx)
 
-	// capacity = runningRunners(7) + runningPairs(3) = 10, uncapped.
+	// runnerSide = 7 real + 3 placeholder = 10; workflowSide = 7 real + 3
+	// placeholder = 10; capacity = min(10, 10) = 10, uncapped.
 	assert.Equal(t, int32(10), maxVal.Load(),
 		"unlimited sentinel must NOT cap reported capacity")
 	// Still 3 pairs (proactive=3, no queued, no cap).
@@ -862,15 +852,19 @@ func TestProvisioner_BrokenPair_DeleteFailure(t *testing.T) {
 type fakeCapacityRecorder struct {
 	mu sync.Mutex
 
-	proactiveCapacity      int
-	maxBurstCapacity       int
-	hudFailureBaseCapacity int
-	hudEnabled             bool
-	queuedJobs             int
-	desiredPairs           int
-	pairs                  int
-	runningPairs           int
-	advertisedMaxRunners   int
+	proactiveCapacity         int
+	maxBurstCapacity          int
+	hudFailureBaseCapacity    int
+	hudEnabled                bool
+	queuedJobs                int
+	desiredPairs              int
+	pairs                     int
+	runningPairs              int
+	scheduledRunnerSide       int
+	scheduledWorkflowSide     int
+	starvedRunners            int
+	unschedulablePlaceholders int
+	advertisedMaxRunners      int
 
 	// Map (role, phase) -> latest count.
 	placeholderPods map[string]map[string]int
@@ -968,6 +962,26 @@ func (f *fakeCapacityRecorder) SetPlaceholderPods(role, phase string, v int) {
 	}
 	f.placeholderPods[role][phase] = v
 	f.setPlaceholderPodsCalls++
+}
+func (f *fakeCapacityRecorder) SetScheduledRunnerSide(v int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.scheduledRunnerSide = v
+}
+func (f *fakeCapacityRecorder) SetScheduledWorkflowSide(v int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.scheduledWorkflowSide = v
+}
+func (f *fakeCapacityRecorder) SetStarvedRunners(v int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.starvedRunners = v
+}
+func (f *fakeCapacityRecorder) SetUnschedulablePlaceholders(v int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.unschedulablePlaceholders = v
 }
 func (f *fakeCapacityRecorder) SetAdvertisedMaxRunners(v int) {
 	f.mu.Lock()
@@ -1088,6 +1102,67 @@ func TestReporter_RecorderWiring(t *testing.T) {
 	assert.Equal(t, 1, rec.observeReconcileCalls[reconcilePhaseReporter])
 }
 
+// TestReporter_EmitsCapacityGauges checks the reporter forwards the classified
+// half-counts to the new capacity gauges.
+func TestReporter_EmitsCapacityGauges(t *testing.T) {
+	cfg := Config{
+		ProactiveCapacity:  1,
+		MaxRunners:         unlimitedMaxRunners,
+		PlaceholderTimeout: 5 * time.Minute,
+	}
+	rec := newFakeCapacityRecorder()
+	m, cs, maxVal := newTestMonitor(t, cfg, nil)
+	m.recorder = rec
+	ctx := context.Background()
+
+	// 2 bound real runner+workflow pairs.
+	createRealRunnerPods(t, cs, "test-ns", "test-sset", 2, corev1.PodRunning, "runner")
+	createRealWorkflowPods(t, cs, "test-ns", 2, corev1.PodRunning, "runner")
+
+	// 1 running placeholder pair (provisioner creates it, then mark Running).
+	m.reconcileProvisioning(ctx)
+	pairs, err := m.placeholders.ListPairs(ctx)
+	require.NoError(t, err)
+	for slotID := range pairs {
+		setPodsPhase(t, cs, ctx, "test-ns", slotID, corev1.PodRunning)
+	}
+
+	m.reconcileReporting(ctx)
+
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	assert.Equal(t, 3, rec.scheduledRunnerSide, "2 real + 1 placeholder runner halves")
+	assert.Equal(t, 3, rec.scheduledWorkflowSide, "2 real + 1 placeholder workflow halves")
+	assert.Equal(t, 0, rec.starvedRunners)
+	assert.Equal(t, 0, rec.unschedulablePlaceholders)
+	assert.Equal(t, int32(3), maxVal.Load())
+}
+
+// TestReporter_StarvedRunnersGauge_NonZero drives the reporter with more bound
+// real runners than bound real workflows and asserts the starved gauge reads
+// the positive difference (real starvation) and stays clamped at zero rather
+// than reading negative during normal ContainerCreating.
+func TestReporter_StarvedRunnersGauge_NonZero(t *testing.T) {
+	cfg := Config{
+		MaxRunners:         unlimitedMaxRunners,
+		PlaceholderTimeout: 5 * time.Minute,
+	}
+	rec := newFakeCapacityRecorder()
+	m, cs, _ := newTestMonitor(t, cfg, nil)
+	m.recorder = rec
+	ctx := context.Background()
+
+	// 2 bound Running real runners, but only 1 has a bound workflow (job) pod.
+	createRealRunnerPods(t, cs, "test-ns", "test-sset", 2, corev1.PodRunning, "runner")
+	createRealWorkflowPods(t, cs, "test-ns", 1, corev1.PodRunning, "runner")
+
+	m.reconcileReporting(ctx)
+
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	assert.Equal(t, 1, rec.starvedRunners, "2 real runners, 1 secured workflow -> 1 starved")
+}
+
 // TestProvisioner_ListPairsError_RecordsSkip simulates a list-pairs error
 // in the provisioner and asserts the skip counter is incremented and
 // the success timestamp is NOT advanced.
@@ -1153,7 +1228,7 @@ func TestProvisioner_RunnerCountError_RecordsSkip(t *testing.T) {
 				return false, nil, nil
 			}
 			sel := la.GetListRestrictions().Labels.String()
-			if strings.Contains(sel, "actions-ephemeral-runner=True") {
+			if strings.Contains(sel, labelEphemeralRunner+"="+labelEphemeralRunnerValue) {
 				return true, nil, fmt.Errorf("synthetic count-runners error")
 			}
 			return false, nil, nil
@@ -1205,12 +1280,47 @@ func createRealRunnerPods(
 				Name:      fmt.Sprintf("%s-%d", namePrefix, i),
 				Namespace: ns,
 				Labels: map[string]string{
-					"actions-ephemeral-runner": "True",
-					labelScaleSet:              scaleSetName,
+					labelEphemeralRunner: labelEphemeralRunnerValue,
+					labelScaleSet:        scaleSetName,
 				},
 			},
 			Spec: corev1.PodSpec{
+				NodeName:   fmt.Sprintf("node-%s-%d", namePrefix, i),
 				Containers: []corev1.Container{{Name: "runner", Image: "runner:latest"}},
+			},
+			Status: corev1.PodStatus{Phase: phase},
+		}
+		_, err := cs.CoreV1().Pods(ns).Create(ctx, pod, metav1.CreateOptions{})
+		require.NoError(t, err)
+	}
+}
+
+// createRealWorkflowPods creates n real workflow (job) pods, each linked via
+// the runner-pod label to a runner pod named "<runnerNamePrefix>-<i>" —
+// mirroring the k8s container hook. Bound (NodeName set) so the counter's
+// boundNonTerminal predicate counts them.
+func createRealWorkflowPods(
+	t *testing.T,
+	cs *fake.Clientset,
+	ns string,
+	n int,
+	phase corev1.PodPhase,
+	runnerNamePrefix string,
+) {
+	t.Helper()
+	ctx := context.Background()
+	for i := 0; i < n; i++ {
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      fmt.Sprintf("%s-%d-workflow", runnerNamePrefix, i),
+				Namespace: ns,
+				Labels: map[string]string{
+					labelWorkflowRunnerPod: fmt.Sprintf("%s-%d", runnerNamePrefix, i),
+				},
+			},
+			Spec: corev1.PodSpec{
+				NodeName:   fmt.Sprintf("node-%s-%d", runnerNamePrefix, i),
+				Containers: []corev1.Container{{Name: "job", Image: "job:latest"}},
 			},
 			Status: corev1.PodStatus{Phase: phase},
 		}

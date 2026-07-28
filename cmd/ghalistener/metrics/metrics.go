@@ -83,6 +83,10 @@ const (
 	MetricCapacityPairCreatesTotal                 = "gha_capacity_pair_creates_total"
 	MetricCapacityPairDeletesTotal                 = "gha_capacity_pair_deletes_total"
 	MetricCapacityReconcileSkipsTotal              = "gha_capacity_reconcile_skips_total"
+	MetricCapacityScheduledRunnerSide              = "gha_capacity_scheduled_runner_side"
+	MetricCapacityScheduledWorkflowSide            = "gha_capacity_scheduled_workflow_side"
+	MetricCapacityStarvedRunners                   = "gha_capacity_starved_runners"
+	MetricCapacityUnschedulablePlaceholders        = "gha_capacity_unschedulable_placeholders"
 )
 
 // Explicit histogram bucket sets for capacity metrics. These are picked
@@ -108,7 +112,7 @@ var metricsHelp = metricsHelpRegistry{
 		MetricCapacityHUDRequestsTotal:    "Total HUD API call attempts by the proactive-capacity monitor, by result.",
 		MetricCapacityPairCreatesTotal:    "Total runner+placeholder pair creation attempts, by result.",
 		MetricCapacityPairDeletesTotal:    "Total runner+placeholder pair deletion attempts, by reason and result.",
-		MetricCapacityReconcileSkipsTotal: "Total reconcile cycles aborted before completion, by reason.",
+		MetricCapacityReconcileSkipsTotal: "Total reconcile cycles aborted before completion or completed in a degraded mode, by reason.",
 	},
 	gauges: map[string]string{
 		MetricAssignedJobs:      "Number of jobs assigned to this scale set.",
@@ -131,6 +135,10 @@ var metricsHelp = metricsHelpRegistry{
 		MetricCapacityPlaceholderPods:                  "Number of placeholder pods by role (runner|workflow) and phase (Pending|Running|Failed|Succeeded|Unknown). The phase values match Kubernetes corev1.PodPhase.",
 		MetricCapacityAdvertisedMaxRunners:             "X-ScaleSetMaxCapacity value sent to GitHub on the most recent reporter cycle.",
 		MetricCapacityReconcileLastSuccessTimestampSec: "Wall-clock seconds of last successful reconcile per sub-loop. Wedge-detection signal.",
+		MetricCapacityScheduledRunnerSide:              "Runner-side capacity halves counted on the most recent reporter cycle: bound real runner pods plus schedulable placeholder-runner pods.",
+		MetricCapacityScheduledWorkflowSide:            "Workflow-side capacity halves counted on the most recent reporter cycle: bound real workflow pods plus schedulable placeholder-workflow pods.",
+		MetricCapacityStarvedRunners:                   "Real runners counted on the runner side that lack a secured workflow slot: max(0, bound real runners - bound real workflows). Surfaces genuine runner/workflow starvation; clamped so normal ContainerCreating never reads negative.",
+		MetricCapacityUnschedulablePlaceholders:        "Running, non-terminating placeholder pods dropped from the capacity count because their node can no longer host a replacement real pod (cordon / disruption taint).",
 	},
 	histograms: map[string]string{
 		MetricJobStartupDurationSeconds:   "Time spent waiting for workflow job to get started on the runner owned by the scale set (in seconds).",
@@ -191,6 +199,10 @@ type CapacityRecorder interface {
 	SetPairs(value int)
 	SetRunningPairs(value int)
 	SetPlaceholderPods(role, phase string, value int)
+	SetScheduledRunnerSide(value int)
+	SetScheduledWorkflowSide(value int)
+	SetStarvedRunners(value int)
+	SetUnschedulablePlaceholders(value int)
 	SetAdvertisedMaxRunners(value int)
 	SetReconcileLastSuccess(phase string, t time.Time)
 	ObserveReconcileDuration(phase string, d time.Duration)
@@ -419,6 +431,18 @@ var defaultMetrics = v1alpha1.MetricsConfig{
 		},
 		MetricCapacityReconcileLastSuccessTimestampSec: {
 			Labels: withExtraLabels(labelKeyPhase),
+		},
+		MetricCapacityScheduledRunnerSide: {
+			Labels: withExtraLabels(),
+		},
+		MetricCapacityScheduledWorkflowSide: {
+			Labels: withExtraLabels(),
+		},
+		MetricCapacityStarvedRunners: {
+			Labels: withExtraLabels(),
+		},
+		MetricCapacityUnschedulablePlaceholders: {
+			Labels: withExtraLabels(),
 		},
 	},
 	Histograms: map[string]*v1alpha1.HistogramMetric{
@@ -739,6 +763,22 @@ func (e *exporter) SetPlaceholderPods(role, phase string, value int) {
 	)
 }
 
+func (e *exporter) SetScheduledRunnerSide(value int) {
+	e.setGauge(MetricCapacityScheduledRunnerSide, e.scaleSetLabels, float64(value))
+}
+
+func (e *exporter) SetScheduledWorkflowSide(value int) {
+	e.setGauge(MetricCapacityScheduledWorkflowSide, e.scaleSetLabels, float64(value))
+}
+
+func (e *exporter) SetStarvedRunners(value int) {
+	e.setGauge(MetricCapacityStarvedRunners, e.scaleSetLabels, float64(value))
+}
+
+func (e *exporter) SetUnschedulablePlaceholders(value int) {
+	e.setGauge(MetricCapacityUnschedulablePlaceholders, e.scaleSetLabels, float64(value))
+}
+
 func (e *exporter) SetAdvertisedMaxRunners(value int) {
 	e.setGauge(MetricCapacityAdvertisedMaxRunners, e.scaleSetLabels, float64(value))
 }
@@ -806,6 +846,10 @@ func (*discard) SetDesiredPairs(int)                            {}
 func (*discard) SetPairs(int)                                   {}
 func (*discard) SetRunningPairs(int)                            {}
 func (*discard) SetPlaceholderPods(string, string, int)         {}
+func (*discard) SetScheduledRunnerSide(int)                     {}
+func (*discard) SetScheduledWorkflowSide(int)                   {}
+func (*discard) SetStarvedRunners(int)                          {}
+func (*discard) SetUnschedulablePlaceholders(int)               {}
 func (*discard) SetAdvertisedMaxRunners(int)                    {}
 func (*discard) SetReconcileLastSuccess(string, time.Time)      {}
 func (*discard) ObserveReconcileDuration(string, time.Duration) {}
