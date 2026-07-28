@@ -7,6 +7,7 @@ import (
 	"math"
 	"math/rand/v2"
 	"os"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -197,8 +198,9 @@ func (m *Monitor) listPairsWithRetry(ctx context.Context, maxRetries int) (map[s
 }
 
 // countRunnersByPhaseWithRetry returns counts of real EphemeralRunner pods for
-// this scale set, keyed by PodPhase. Used by the reporter (Running for advertised
-// capacity) and the provisioner (Running+Pending for MaxRunners headroom).
+// this scale set, keyed by PodPhase. Used by the provisioner (Running+Pending
+// for MaxRunners headroom). The reporter uses countScheduledRunnersWithRetry
+// instead — see the note there on why runner-pod phase over-reports capacity.
 //
 // Performs a single List with the label selector and groups in code — no
 // FieldSelector. Phases not present in the result map have count 0.
@@ -224,6 +226,56 @@ func (m *Monitor) countRunnersByPhaseWithRetry(ctx context.Context, maxRetries i
 		return nil
 	})
 	return counts, err
+}
+
+// countScheduledRunnersWithRetry returns the number of EphemeralRunner pods for
+// this scale set whose job pod ("<runner>-workflow") is Running — i.e. secured a
+// node, not merely started the runner container. Job pods carry no scale-set
+// label, so they're matched by name (placeholders excluded via role label).
+// Runners with a missing/Pending job pod are not counted.
+//
+// TODO(perf): back the job-pod lookup with a shared informer/lister to avoid a
+// per-cycle namespace List in busy shared namespaces.
+func (m *Monitor) countScheduledRunnersWithRetry(ctx context.Context, maxRetries int) (int, error) {
+	var scheduled int
+	err := retryWithBackoff(ctx, m.logger, "count-scheduled-runners", maxRetries, func() error {
+		runnerSel := fmt.Sprintf("actions-ephemeral-runner=True,%s=%s",
+			labelScaleSet, m.config.ScaleSetName,
+		)
+		runners, e := m.clientset.CoreV1().Pods(m.config.Namespace).List(ctx, metav1.ListOptions{
+			LabelSelector: runnerSel,
+		})
+		if e != nil {
+			return e
+		}
+
+		// Job pods in the namespace keyed by name (placeholders excluded via
+		// role label), filtered to "-workflow" names to keep the map small.
+		jobPods, e := m.clientset.CoreV1().Pods(m.config.Namespace).List(ctx, metav1.ListOptions{
+			LabelSelector: fmt.Sprintf("!%s", labelPlaceholderRole),
+		})
+		if e != nil {
+			return e
+		}
+		phaseByName := make(map[string]corev1.PodPhase, len(jobPods.Items))
+		for i := range jobPods.Items {
+			if strings.HasSuffix(jobPods.Items[i].Name, "-workflow") {
+				phaseByName[jobPods.Items[i].Name] = jobPods.Items[i].Status.Phase
+			}
+		}
+
+		scheduled = 0
+		for i := range runners.Items {
+			if runners.Items[i].Status.Phase != corev1.PodRunning {
+				continue
+			}
+			if phaseByName[runners.Items[i].Name+"-workflow"] == corev1.PodRunning {
+				scheduled++
+			}
+		}
+		return nil
+	})
+	return scheduled, err
 }
 
 func (m *Monitor) queryHUDWithRetry(ctx context.Context) (int, error) {
@@ -597,17 +649,19 @@ func (m *Monitor) reconcileReporting(ctx context.Context) {
 	}
 	m.recorder.SetRunningPairs(runningPairs)
 
-	// 2. Count running runners with retry. On failure, keep previous capacity.
-	counts, err := m.countRunnersByPhaseWithRetry(ctx, reporterMaxRetries)
+	// 2. Count runners whose job pod is scheduled (Running). On failure, keep
+	// previous capacity. Counting runner-pod phase would over-report: a runner
+	// pod is Running on the cheap runner pool even while its job pod is stuck
+	// Pending for lack of a node, so those don't represent secured capacity.
+	scheduledRunners, err := m.countScheduledRunnersWithRetry(ctx, reporterMaxRetries)
 	if err != nil {
-		m.logger.Warn("failed to count runners, keeping previous capacity", "error", err)
+		m.logger.Warn("failed to count scheduled runners, keeping previous capacity", "error", err)
 		m.recorder.IncReconcileSkips(skipReasonReporterCountRunners)
 		return
 	}
-	runningRunners := counts[corev1.PodRunning]
 
 	// 3. Report capacity to GitHub.
-	capacity := runningRunners + runningPairs
+	capacity := scheduledRunners + runningPairs
 	if m.config.MaxRunners < unlimitedMaxRunners {
 		capacity = min(capacity, m.config.MaxRunners)
 	}
@@ -618,7 +672,7 @@ func (m *Monitor) reconcileReporting(ctx context.Context) {
 
 	m.logger.Info("capacity reported",
 		"runningPairs", runningPairs,
-		"runningRunners", runningRunners,
+		"scheduledRunners", scheduledRunners,
 		"reportedCapacity", capacity,
 	)
 	// Mark success only at the end of a fully completed cycle. Early-exit

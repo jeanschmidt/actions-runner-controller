@@ -255,6 +255,8 @@ func TestReconcile_SetMaxRunners_CapAtMaxRunners(t *testing.T) {
 		_, err := cs.CoreV1().Pods("test-ns").Create(ctx, pod, metav1.CreateOptions{})
 		require.NoError(t, err)
 	}
+	// Their job pods are scheduled (Running), so they count as secured capacity.
+	createJobPods(t, cs, "test-ns", []string{"runner-a", "runner-b", "runner-c"}, corev1.PodRunning)
 
 	m.reconcileProvisioning(ctx)
 	m.reconcileReporting(ctx)
@@ -268,7 +270,7 @@ func TestReconcile_SetMaxRunners_CapAtMaxRunners(t *testing.T) {
 	m.reconcileProvisioning(ctx)
 	m.reconcileReporting(ctx)
 
-	// capacity = min(runningRunners(3) + runningPairs(2), maxRunners(5)) = 5.
+	// capacity = min(scheduledRunners(3) + runningPairs(2), maxRunners(5)) = 5.
 	assert.Equal(t, int32(5), maxVal.Load())
 }
 
@@ -601,16 +603,44 @@ func TestReconcile_MaxRunnersUnset_IsUnlimited(t *testing.T) {
 		setPodsPhase(t, cs, ctx, "test-ns", slotID, corev1.PodRunning)
 	}
 	createRealRunnerPods(t, cs, "test-ns", "test-sset", 7, corev1.PodRunning, "runner")
+	// Their job pods are scheduled (Running), so they count as secured capacity.
+	createJobPods(t, cs, "test-ns", jobPodNames("runner", 7), corev1.PodRunning)
 
 	m.reconcileProvisioning(ctx)
 	m.reconcileReporting(ctx)
 
-	// capacity = runningRunners(7) + runningPairs(3) = 10, uncapped.
+	// capacity = scheduledRunners(7) + runningPairs(3) = 10, uncapped.
 	assert.Equal(t, int32(10), maxVal.Load(),
 		"unlimited sentinel must NOT cap reported capacity")
 	// Still 3 pairs (proactive=3, no queued, no cap).
 	pairs, _ = m.placeholders.ListPairs(ctx)
 	assert.Len(t, pairs, 3)
+}
+
+// TestReconcile_StuckRunnerNotCountedAsCapacity locks in the core fix: a runner
+// pod that is Running but whose job pod is stuck Pending (e.g. no schedulable
+// GPU node) must NOT be advertised as capacity — otherwise the listener keeps
+// acquiring jobs it cannot fulfil. Only runners whose job pod is Running count.
+func TestReconcile_StuckRunnerNotCountedAsCapacity(t *testing.T) {
+	cfg := Config{
+		ProactiveCapacity:  0, // no placeholders — isolate the runner term
+		MaxRunners:         unlimitedMaxRunners,
+		ScaleSetName:       "test-sset",
+		PlaceholderTimeout: 5 * time.Minute,
+	}
+	m, cs, maxVal := newTestMonitor(t, cfg, nil)
+	ctx := context.Background()
+
+	// 3 Running runner pods: one scheduled, two GPU-starved (job pod Pending).
+	createRealRunnerPods(t, cs, "test-ns", "test-sset", 3, corev1.PodRunning, "runner")
+	createJobPods(t, cs, "test-ns", []string{"runner-0"}, corev1.PodRunning)
+	createJobPods(t, cs, "test-ns", []string{"runner-1", "runner-2"}, corev1.PodPending)
+
+	m.reconcileReporting(ctx)
+
+	// Only runner-0 (job pod Running) counts. The two stuck runners do not.
+	assert.Equal(t, int32(1), maxVal.Load(),
+		"runners whose job pod is Pending must not advertise phantom capacity")
 }
 
 func TestRunLoop_CancellationCleansUp(t *testing.T) {
@@ -1217,6 +1247,37 @@ func createRealRunnerPods(
 		_, err := cs.CoreV1().Pods(ns).Create(ctx, pod, metav1.CreateOptions{})
 		require.NoError(t, err)
 	}
+}
+
+// createJobPods creates a real job pod ("<runner>-workflow") for each named
+// runner in the given phase. Job pods carry no placeholder role label — matching
+// what runner-container-hooks produce — so countScheduledRunnersWithRetry treats
+// them as the runner's scheduled workload.
+func createJobPods(t *testing.T, cs *fake.Clientset, ns string, runnerNames []string, phase corev1.PodPhase) {
+	t.Helper()
+	ctx := context.Background()
+	for _, rn := range runnerNames {
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      rn + "-workflow",
+				Namespace: ns,
+			},
+			Spec:   corev1.PodSpec{Containers: []corev1.Container{{Name: "job", Image: "job:latest"}}},
+			Status: corev1.PodStatus{Phase: phase},
+		}
+		_, err := cs.CoreV1().Pods(ns).Create(ctx, pod, metav1.CreateOptions{})
+		require.NoError(t, err)
+	}
+}
+
+// jobPodNames returns "<prefix>-0"..."<prefix>-(n-1)", matching the runner pod
+// names produced by createRealRunnerPods.
+func jobPodNames(prefix string, n int) []string {
+	names := make([]string, n)
+	for i := 0; i < n; i++ {
+		names[i] = fmt.Sprintf("%s-%d", prefix, i)
+	}
+	return names
 }
 
 // MaxBurstCapacity = 0 means "no cap" — desiredPairs equals the proactive +
