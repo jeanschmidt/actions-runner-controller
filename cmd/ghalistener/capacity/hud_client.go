@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 )
 
@@ -27,11 +28,13 @@ type hudRequestParams struct {
 	RunnerLabels           []string `json:"runnerLabels"`
 }
 
+func defaultHUDOrgs() []string { return []string{"pytorch"} }
+
 func defaultHUDRequestParams() hudRequestParams {
 	return hudRequestParams{
 		QueuedThresholdMinutes: 0,
 		MaxAgeDays:             1,
-		Orgs:                   []string{"pytorch"},
+		Orgs:                   defaultHUDOrgs(),
 		Repo:                   "",
 	}
 }
@@ -48,19 +51,34 @@ type QueuedJobsForRunner struct {
 type HUDClient struct {
 	url    string
 	token  string
+	orgs   []string
 	client *http.Client
 }
 
-func NewHUDClient(hudURL, token string) *HUDClient {
+func NewHUDClient(hudURL, token string, orgs ...string) *HUDClient {
 	return &HUDClient{
 		url:    hudURL,
 		token:  token,
+		orgs:   orgs,
 		client: &http.Client{Timeout: 10 * time.Second},
 	}
 }
 
 func (c *HUDClient) buildURL(labels []string, thresholdMinutes int) (string, error) {
 	p := defaultHUDRequestParams()
+	// Drop empty/whitespace orgs so a stray "" can never reach the wire:
+	// HUD treats orgs:[""] as "no filter → every org", which would size a
+	// listener's capacity from every org's queue. Empty after filtering
+	// leaves the in-code default (defaultHUDOrgs) untouched.
+	filtered := make([]string, 0, len(c.orgs))
+	for _, org := range c.orgs {
+		if trimmed := strings.TrimSpace(org); trimmed != "" {
+			filtered = append(filtered, trimmed)
+		}
+	}
+	if len(filtered) > 0 {
+		p.Orgs = filtered
+	}
 	p.QueuedThresholdMinutes = thresholdMinutes
 	if labels == nil {
 		// Marshal as `[]`, not `null`.

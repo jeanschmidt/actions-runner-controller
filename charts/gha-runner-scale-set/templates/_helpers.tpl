@@ -11,7 +11,7 @@ gha-rs
 {{- end }}
 
 {{- define "gha-runner-scale-set.scale-set-name" -}}
-{{ .Values.runnerScaleSetName | default .Release.Name }}
+{{ .Values.resourceName | default .Values.runnerScaleSetName | default .Release.Name }}
 {{- end }}
 
 {{/*

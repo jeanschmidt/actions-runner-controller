@@ -136,7 +136,7 @@ func New(
 			config,
 			logger,
 		),
-		hudClient:     NewHUDClient(config.HUDAPIURL, config.HUDAPIToken),
+		hudClient:     NewHUDClient(config.HUDAPIURL, config.HUDAPIToken, config.HUDOrgs...),
 		clientset:     clientset,
 		setMaxRunners: setMaxRunners,
 		logger:        logger.With("component", "capacity-monitor"),
