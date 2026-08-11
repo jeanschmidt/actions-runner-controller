@@ -327,3 +327,53 @@ func TestGetQueuedJobsForLabelsWithThreshold_EmptyLabelsShortCircuits(t *testing
 	require.NoError(t, err)
 	assert.Equal(t, 0, total)
 }
+
+// The orgs sent on the wire come from the HUDClient constructor: explicit
+// orgs override the default, surrounding whitespace is trimmed, and
+// empty/whitespace-only entries are dropped so they can never reach the wire
+// as orgs:[""] — which HUD reads as "no filter → every org", sizing a
+// listener from every org's queue. A client left with no usable org emits the
+// built-in default (["pytorch"]) and is indistinguishable on the wire from one
+// that hardcodes it.
+func TestNewHUDClient_OrgsOnWire(t *testing.T) {
+	newServerCapturingOrgs := func(t *testing.T, out *[]string) *httptest.Server {
+		t.Helper()
+		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var got struct {
+				Orgs []string `json:"orgs"`
+			}
+			paramsRaw := r.URL.Query().Get("parameters")
+			require.NotEmpty(t, paramsRaw, "request must carry a parameters query")
+			require.NoError(t, json.Unmarshal([]byte(paramsRaw), &got))
+			*out = got.Orgs
+			w.WriteHeader(http.StatusOK)
+			require.NoError(t, json.NewEncoder(w).Encode([]QueuedJobsForRunner{}))
+		}))
+	}
+
+	tests := []struct {
+		name     string
+		orgs     []string
+		wantOrgs []string
+	}{
+		{"no orgs falls back to default", nil, []string{"pytorch"}},
+		{"explicit org overrides default", []string{"meta-pytorch"}, []string{"meta-pytorch"}},
+		{"empty-string org falls back to default", []string{""}, []string{"pytorch"}},
+		{"whitespace-only org falls back to default", []string{"   "}, []string{"pytorch"}},
+		{"surrounding whitespace is trimmed", []string{" meta-pytorch "}, []string{"meta-pytorch"}},
+		{"empty org filtered out, real org kept", []string{"", "meta-pytorch"}, []string{"meta-pytorch"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var gotOrgs []string
+			srv := newServerCapturingOrgs(t, &gotOrgs)
+			defer srv.Close()
+
+			client := NewHUDClient(srv.URL, "tok", tt.orgs...)
+			_, err := client.GetQueuedJobsForLabels(context.Background(), []string{"any-label"})
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantOrgs, gotOrgs)
+		})
+	}
+}

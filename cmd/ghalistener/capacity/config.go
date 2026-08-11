@@ -85,6 +85,11 @@ type Config struct {
 	HUDAPIToken          string
 	HUDFailureMultiplier int
 
+	// HUDOrgs is the GitHub org(s) queried for queued jobs. Set by main.go
+	// from the listener's own GitHub config URL (not an env var); empty
+	// leaves the HUD client on its built-in default org.
+	HUDOrgs []string
+
 	// HUDFailureBaseCapacity is an additive baseline applied to the fallback
 	// formula when the HUD API is unreachable. Lets operators provision a
 	// flat surge floor even when ProactiveCapacity is 0 (where the

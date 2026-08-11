@@ -69,6 +69,16 @@ githubConfigSecret:
 ## name of the runner scale set to create.  Defaults to the helm release name
 # runnerScaleSetName: ""
 
+## resourceName overrides the names of the Kubernetes resources this chart creates
+## (the AutoscalingRunnerSet and every derived resource: the GitHub config secret,
+## the no-permission and kubernetes-mode service accounts, and the manager and
+## kubernetes-mode roles and role bindings), as well as the app.kubernetes.io/name,
+## app.kubernetes.io/instance and actions.github.com/scale-set-name labels.
+## It decouples the Kubernetes resource name from runnerScaleSetName, which stays the
+## name registered with GitHub. Defaults to runnerScaleSetName, then the helm release
+## name. Must be 45 characters or fewer.
+# resourceName: ""
+
 ## A self-signed CA certificate for communication with the GitHub server can be
 ## provided using a config map key selector. If `runnerMountPath` is set, for
 ## each runner pod ARC will:

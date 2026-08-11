@@ -147,6 +147,9 @@ func run(ctx context.Context, config *config.Config) error {
 		capConfig.ScaleSetLabels = labels
 		capConfig.Namespace = config.EphemeralRunnerSetNamespace
 		capConfig.ScaleSetName = config.RunnerScaleSetName
+		if ghConfig.Organization != "" {
+			capConfig.HUDOrgs = []string{ghConfig.Organization}
+		}
 
 		k8sConf, err := rest.InClusterConfig()
 		if err != nil {

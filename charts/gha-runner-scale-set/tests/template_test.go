@@ -514,6 +514,59 @@ func TestTemplateRenderedAutoScalingRunnerSet_RunnerScaleSetName(t *testing.T) {
 	assert.Equal(t, "ghcr.io/actions/actions-runner:latest", ars.Spec.Template.Spec.Containers[0].Image)
 }
 
+func TestTemplateRenderedAutoScalingRunnerSet_ResourceName(t *testing.T) {
+	t.Parallel()
+
+	// Path to the helm chart we will test
+	helmChartPath, err := filepath.Abs("../../gha-runner-scale-set")
+	require.NoError(t, err)
+
+	releaseName := "test-runners"
+	resourceName := "rn-k8s"
+	runnerScaleSetName := "gh-label"
+	namespaceName := "test-" + strings.ToLower(random.UniqueId())
+
+	options := &helm.Options{
+		Logger: logger.Discard,
+		SetValues: map[string]string{
+			"githubConfigUrl":                    "https://github.com/actions",
+			"githubConfigSecret.github_token":    "gh_token12345",
+			"resourceName":                       resourceName,
+			"runnerScaleSetName":                 runnerScaleSetName,
+			"controllerServiceAccount.name":      "arc",
+			"controllerServiceAccount.namespace": "arc-system",
+		},
+		KubectlOptions: k8s.NewKubectlOptions("", "", namespaceName),
+	}
+
+	output := helm.RenderTemplate(t, options, helmChartPath, releaseName, []string{"templates/autoscalingrunnerset.yaml"})
+
+	var ars v1alpha1.AutoscalingRunnerSet
+	helm.UnmarshalK8SYaml(t, output, &ars)
+
+	assert.Equal(t, namespaceName, ars.Namespace)
+	assert.Equal(t, resourceName, ars.Name)
+
+	assert.Equal(t, resourceName, ars.Labels["app.kubernetes.io/name"])
+	assert.Equal(t, resourceName, ars.Labels["app.kubernetes.io/instance"])
+	assert.Equal(t, resourceName, ars.Labels["actions.github.com/scale-set-name"])
+	assert.Equal(t, namespaceName, ars.Labels["actions.github.com/scale-set-namespace"])
+	assert.Equal(t, "gha-rs", ars.Labels["app.kubernetes.io/part-of"])
+
+	assert.Equal(t, "https://github.com/actions", ars.Spec.GitHubConfigUrl)
+	assert.Equal(t, resourceName+"-gha-rs-github-secret", ars.Spec.GitHubConfigSecret)
+
+	// runnerScaleSetName stays the GitHub-registered runner label, decoupled from resourceName.
+	assert.Equal(t, runnerScaleSetName, ars.Spec.RunnerScaleSetName)
+
+	// A derived resource is named from resourceName, not runnerScaleSetName.
+	saOutput := helm.RenderTemplate(t, options, helmChartPath, releaseName, []string{"templates/no_permission_serviceaccount.yaml"})
+	var serviceAccount corev1.ServiceAccount
+	helm.UnmarshalK8SYaml(t, saOutput, &serviceAccount)
+	assert.True(t, strings.HasPrefix(serviceAccount.Name, resourceName), "service account name %q should be prefixed with %q", serviceAccount.Name, resourceName)
+	assert.Equal(t, resourceName+"-gha-rs-no-permission", serviceAccount.Name)
+}
+
 func TestTemplateRenderedAutoScalingRunnerSet_ScaleSetLabels(t *testing.T) {
 	t.Parallel()
 
