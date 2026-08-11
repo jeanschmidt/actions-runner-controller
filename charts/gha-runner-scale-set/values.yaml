@@ -77,6 +77,8 @@ githubConfigSecret:
 ## It decouples the Kubernetes resource name from runnerScaleSetName, which stays the
 ## name registered with GitHub. Defaults to runnerScaleSetName, then the helm release
 ## name. Must be 45 characters or fewer.
+## The decoupling only holds when runnerScaleSetName is also set; if it is unset, the
+## runner scale set registered with GitHub is named after resourceName too.
 # resourceName: ""
 
 ## A self-signed CA certificate for communication with the GitHub server can be
