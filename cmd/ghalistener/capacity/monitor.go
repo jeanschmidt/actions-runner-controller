@@ -39,10 +39,11 @@ const (
 	resultSuccess = "success"
 	resultError   = "error"
 
-	deleteReasonOrphan  = "orphan"
-	deleteReasonTimeout = "timeout"
-	deleteReasonExcess  = "excess"
-	deleteReasonBroken  = "broken"
+	deleteReasonOrphan   = "orphan"
+	deleteReasonTimeout  = "timeout"
+	deleteReasonExcess   = "excess"
+	deleteReasonBroken   = "broken"
+	deleteReasonTerminal = "terminal"
 
 	skipReasonProvisionerListPairs      = "provisioner_list_pairs"
 	skipReasonProvisionerListRunners    = "provisioner_list_runners"
@@ -457,16 +458,9 @@ func (m *Monitor) reconcileProvisioning(ctx context.Context) {
 	if err != nil {
 		m.logger.Warn("failed to list pairs for timed-out cleanup", "error", err)
 		m.recorder.IncPairDeletes(deleteReasonTimeout, resultError)
-	} else if timedOutSuccess > 0 || timedOutFailed > 0 {
-		m.logger.Info("cleaned up timed-out placeholder pairs",
-			"success", timedOutSuccess, "failed", timedOutFailed)
 	}
-	for i := 0; i < timedOutSuccess; i++ {
-		m.recorder.IncPairDeletes(deleteReasonTimeout, resultSuccess)
-	}
-	for i := 0; i < timedOutFailed; i++ {
-		m.recorder.IncPairDeletes(deleteReasonTimeout, resultError)
-	}
+	m.recordPairDeletes(deleteReasonTimeout, "cleaned up timed-out placeholder pairs",
+		timedOutSuccess, timedOutFailed)
 
 	// 3. List current pairs with retry.
 	pairs, err := m.listPairsWithRetry(ctx, provisionerMaxRetries)
@@ -481,20 +475,15 @@ func (m *Monitor) reconcileProvisioning(ctx context.Context) {
 	// provisioner would not re-create capacity to replace them. The
 	// surviving orphan pod is deleted; the next adjustPairs step will
 	// create a fresh full pair to fill the freed slot in this same cycle.
-	brokenSuccess, brokenFailed, brokenSlots := m.placeholders.CleanupBroken(ctx, pairs)
-	for _, slotID := range brokenSlots {
-		delete(pairs, slotID)
-	}
-	for i := 0; i < brokenSuccess; i++ {
-		m.recorder.IncPairDeletes(deleteReasonBroken, resultSuccess)
-	}
-	for i := 0; i < brokenFailed; i++ {
-		m.recorder.IncPairDeletes(deleteReasonBroken, resultError)
-	}
-	if brokenSuccess > 0 || brokenFailed > 0 {
-		m.logger.Info("cleaned up broken placeholder pairs",
-			"success", brokenSuccess, "failed", brokenFailed)
-	}
+	m.cleanupPairs(ctx, pairs, deleteReasonBroken, "cleaned up broken placeholder pairs",
+		m.placeholders.CleanupBroken)
+
+	// 3c. Cleanup terminal pairs (a pod Succeeded or Failed). Placeholders use
+	// RestartPolicy Never, so a terminal pod never holds capacity again;
+	// counted, these pairs would pin currentPairs at desired and never be
+	// replaced.
+	m.cleanupPairs(ctx, pairs, deleteReasonTerminal, "cleaned up terminal placeholder pairs",
+		m.placeholders.CleanupTerminal)
 
 	currentPairs := len(pairs)
 	m.recorder.SetPairs(currentPairs)

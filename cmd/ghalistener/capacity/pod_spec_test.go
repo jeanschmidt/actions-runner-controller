@@ -2,6 +2,7 @@ package capacity
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -259,23 +260,38 @@ func TestPlaceholderPods_SleepCommand_ZeroTimeoutFallsBackToInfinity(t *testing.
 	}
 }
 
-// When PlaceholderTimeout is set, the placeholder container's sleep argument
-// must be PlaceholderTimeout * 1.5 seconds. This is the defensive
-// self-terminate that bounds pod lifetime if the listener crashes before
-// CleanupAll/CleanupTimedOut run. 5min * 1.5 = 7.5min = 450s.
-func TestPlaceholderPods_SleepCommand_UsesTimeoutTimes1_5(t *testing.T) {
-	pm, _ := newTestPM(t, Config{PlaceholderTimeout: 5 * time.Minute})
+// When PlaceholderTimeout is set, both halves of a pair sleep the same
+// duration in [1.5, 2) x PlaceholderTimeout seconds, jittered by listener and
+// slot ID so pairs created together do not all end at once. The sleep bounds
+// the lifetime of started placeholders if the listener dies before CleanupAll
+// runs. 5min x [1.5, 2) = [450s, 600s).
+func TestPlaceholderPods_SleepCommand_UsesTimeoutTimes1_5To2(t *testing.T) {
+	cfg := Config{PlaceholderTimeout: 5 * time.Minute}
+	pm, _ := newTestPM(t, cfg)
+	other := NewPlaceholderManager(newFakeClientset(), "test-ns", "other-listener", cfg, discardLogger)
 	ctx := context.Background()
 
-	require.NoError(t, pm.CreatePair(ctx, "cmd-slot"))
-	pairs, _ := pm.ListPairs(ctx)
-	pair := pairs["cmd-slot"]
-
-	for _, pod := range []*corev1.Pod{pair.RunnerPod, pair.WorkflowPod} {
-		require.NotNil(t, pod)
-		require.Len(t, pod.Spec.Containers, 1)
-		assert.Equal(t, []string{"sleep", "450"}, pod.Spec.Containers[0].Command)
+	slotIDs := []string{"cmd-slot", "slot-a", "slot-b"}
+	for _, slotID := range slotIDs {
+		require.NoError(t, pm.CreatePair(ctx, slotID))
 	}
+	pairs, _ := pm.ListPairs(ctx)
+
+	sleeps := make(map[string]struct{})
+	for _, slotID := range slotIDs {
+		command := pairs[slotID].RunnerPod.Spec.Containers[0].Command
+		require.Len(t, command, 2)
+		assert.Equal(t, "sleep", command[0])
+		seconds, err := strconv.Atoi(command[1])
+		require.NoError(t, err)
+		assert.GreaterOrEqual(t, seconds, 450, slotID)
+		assert.Less(t, seconds, 600, slotID)
+		assert.Equal(t, command, pairs[slotID].WorkflowPod.Spec.Containers[0].Command,
+			"both halves of %s sleep the same duration", slotID)
+		assert.NotEqual(t, command[1], other.sleepArg(slotID), "%s sleeps differently on another listener", slotID)
+		sleeps[command[1]] = struct{}{}
+	}
+	assert.Greater(t, len(sleeps), 1, "slots do not all sleep the same duration")
 }
 
 // Sub-second timeouts truncate to zero seconds; the helper floors to 1 so the
