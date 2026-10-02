@@ -150,18 +150,13 @@ func (pm *PlaceholderManager) CleanupTimedOut(ctx context.Context) (int, int, er
 	if err != nil {
 		return 0, 0, err
 	}
-	deleted, failed := 0, 0
-	for slotID, pair := range pairs {
-		if pair.AnyPendingTooLong(pm.config.PlaceholderTimeout) {
-			if err := pm.DeletePair(ctx, slotID); err != nil {
-				pm.logger.Error("failed to delete timed-out pair", "slotID", slotID, "error", err)
-				failed++
-				continue
-			}
-			deleted++
-		}
-	}
-	return deleted, failed, nil
+	deleted, errored, _ := pm.deletePairsWhere(ctx, pairs,
+		func(pair *PlaceholderPair) bool { return pair.AnyPendingTooLong(pm.config.PlaceholderTimeout) },
+		func(slotID string, _ *PlaceholderPair, err error) {
+			pm.logger.Error("failed to delete timed-out pair", "slotID", slotID, "error", err)
+		},
+	)
+	return deleted, errored, nil
 }
 
 // CleanupBroken deletes pairs where only one of the two placeholder pods
@@ -185,27 +180,17 @@ func (pm *PlaceholderManager) CleanupBroken(
 	ctx context.Context,
 	pairs map[string]*PlaceholderPair,
 ) (int, int, []string) {
-	var deletedSlots []string
-	deleted, failed := 0, 0
-	for slotID, pair := range pairs {
-		if pair.RunnerPod != nil && pair.WorkflowPod != nil {
-			continue
-		}
-		if err := pm.DeletePair(ctx, slotID); err != nil {
+	return pm.deletePairsWhere(ctx, pairs,
+		func(pair *PlaceholderPair) bool { return pair.RunnerPod == nil || pair.WorkflowPod == nil },
+		func(slotID string, pair *PlaceholderPair, err error) {
 			pm.logger.Warn("failed to delete broken pair",
 				"slotID", slotID,
 				"hasRunner", pair.RunnerPod != nil,
 				"hasWorkflow", pair.WorkflowPod != nil,
 				"error", err,
 			)
-			failed++
-			deletedSlots = append(deletedSlots, slotID)
-			continue
-		}
-		deleted++
-		deletedSlots = append(deletedSlots, slotID)
-	}
-	return deleted, failed, deletedSlots
+		},
+	)
 }
 
 // CleanupOrphans deletes placeholder pods and anchor ConfigMaps from
@@ -546,14 +531,16 @@ func (pm *PlaceholderManager) buildWorkflowAffinity() *corev1.Affinity {
 	}
 }
 
-// sleepArg returns the sleep duration for placeholder containers as a
-// defensive self-terminate so pods don't leak if the listener crashes
-// before CleanupAll/CleanupTimedOut run.
-func (pm *PlaceholderManager) sleepArg() string {
+// sleepArg gives started placeholders a bounded lifetime, roughly 1.5x to 2x
+// PlaceholderTimeout, so they end even if the listener dies before
+// CleanupAll runs. Both halves of a pair share the lifetime key; it includes
+// the listener because slot IDs repeat across listeners.
+func (pm *PlaceholderManager) sleepArg(slotID string) string {
 	if pm.config.PlaceholderTimeout <= 0 {
 		return "infinity"
 	}
-	seconds := int64(pm.config.PlaceholderTimeout * 3 / 2 / time.Second)
+	lifetime := placeholderLifetime(pm.config.PlaceholderTimeout, pm.listenerID+"/"+slotID)
+	seconds := int64(lifetime / time.Second)
 	if seconds < 1 {
 		seconds = 1
 	}
@@ -593,7 +580,7 @@ func (pm *PlaceholderManager) placeholderPodShell(
 				{
 					Name:      "placeholder",
 					Image:     placeholderImage,
-					Command:   []string{"sleep", pm.sleepArg()},
+					Command:   []string{"sleep", pm.sleepArg(slotID)},
 					Resources: resources,
 				},
 			},
